@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — see ../DESIGN.md for rationale (Operate-mode, Restrained color
+ * strategy, one type family, fixed rem scale, locked radius-per-role).
+ */
+@theme {
+  /* Color */
+  --color-canvas: #f6f7fa;
+  --color-surface: #ffffff;
+  --color-surface-muted: #eef1f5;
+  --color-border: #dce0e7;
+  --color-border-strong: #b9c0cc;
+  --color-text: #161a22;
+  --color-text-muted: #565e6e;
+  --color-text-subtle: #8991a3;
+
+  --color-accent: #2b4e8c;
+  --color-accent-hover: #213d6e;
+  --color-accent-contrast: #ffffff;
+  --color-accent-soft: #e7edf7;
+
+  --color-success: #1b7a4d;
+  --color-success-bg: #e4f4ea;
+  --color-warning: #8a5a0a;
+  --color-warning-bg: #fbf0da;
+  --color-danger: #b02a25;
+  --color-danger-bg: #fae7e5;
+  --color-info: #3a5273;
+  --color-info-bg: #e9eef5;
+  --color-muted: #666d7a;
+  --color-muted-bg: #eef0f3;
+
+  /* Type */
+  --font-sans: -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", "Noto Sans", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1.0625rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+
+  /* Radius — locked per role: sm = controls, md = containers, full = pills */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+
+  /* Motion */
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Verbatim source-document text: correct bidi for embedded Arabic inside the
+ * French LTR shell, and a visible "quoted source" treatment so it never reads
+ * as UI copy (see DESIGN.md — French / Arabic text handling). */
+.source-quote {
+  direction: ltr;
+  unicode-bidi: plaintext;
+  background: var(--color-surface-muted);
+  border-inline-start: 3px solid var(--color-border-strong);
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+}
+
+/* Tabular alignment for money, revisions, IDs, dates. */
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

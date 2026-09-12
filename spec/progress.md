@@ -51,7 +51,7 @@ These choices can be confirmed asynchronously. They do not prevent the documenta
 | ID | Task | Status | Depends on | Evidence / notes |
 | --- | --- | --- | --- | --- |
 | UI-01 | Confirm B9 payloads, enums and error handling | Not started | Joint contract review | |
-| UI-02 | Create frontend package and explicit fixture adapter | Not started | Development authorization | |
+| UI-02 | Create frontend package and explicit fixture adapter | In review | Development authorization | PR `feat/ui-02-scaffold` → master, "feat(ui): scaffold frontend, CaseApi adapters and design system (UI-02)". Vite+React+TS(strict)+Router+Tailwind v4 scaffold; `PRODUCT.md`/`DESIGN.md`; `src/api/types.ts` (all B9 types, gaps below), `CaseApi` interface, fixture adapter (seeded 2 preparers + 1 reviewer, demo case per P6) and HTTP adapter; adapter selection via `VITE_DATA_MODE`; app shell (session restore, role route guards, fixture banner FE-12, header, 404); `/login` fully built, other F4 routes placeholder. `npm run typecheck/test/build/lint` all pass; browser-checked desktop+mobile. |
 | UI-03 | Intake form and targeted follow-up experience | Not started | UI-01, UI-02 | |
 | UI-04 | Upload list, limits, source-page preview | Not started | UI-01, UI-02 | |
 | UI-05 | Validated findings, coverage and response controls | Not started | UI-01, UI-02 | |
@@ -61,6 +61,26 @@ These choices can be confirmed asynchronously. They do not prevent the documenta
 | UI-09 | HTTP adapter integration and FE-01–FE-12 checks | Not started | API contract implemented | |
 
 UI update template: completed task, current task, exact blocked endpoint/field, evidence (commit/test/demo note), next handoff. Do not edit API status without coordination.
+
+### B9 gaps (UI provisional types, pending API confirmation)
+
+B9 (backend.md) is authoritative but does not spell out every field name or inner shape. Where a route or object was described in prose only, `frontend/src/api/types.ts` defines a minimal provisional TypeScript type (each marked `// PROVISIONAL (B9 gap): ...` in the source) consistent with B9 conventions (`{items,next_cursor}`, the error envelope, decimal strings, UTC ISO timestamps). Confirm with API before relying on these shapes past UI-02:
+
+- `GET /config`: inner shape of `limits` (assumed `max_active_files`, `max_total_pages`, `max_file_bytes`, `max_case_bytes`, named after local-dev.md L3) and of `legal_coverage` (assumed a `case_type → "unvalidated"|"validated"` map).
+- Auth: `user` object fields (assumed `id`, `email`, `role`, `display_name`).
+- CSRF header name for mutating requests (assumed `X-CSRF-Token`).
+- Idempotency header name for `POST /cases/{id}/analyses|exports|submissions` (assumed `Idempotency-Key`).
+- Claim: `follow_up_answers` entry field names (assumed `{question_id, answer}`).
+- `GET /cases` summary row fields (assumed `case_id, case_type, claimant_name, counterparty_name, claimed_amount, currency, revision, intake_status, updated_at`).
+- `GET /cases/{id}` overall composition (claim/revision/documents/latest job+analysis/submissions/activity) — assumed field names `latest_job`, `latest_analysis`, `submissions`, `activity`.
+- Document object fields beyond id (assumed `filename, document_type, pages, uploaded_at, state, error, active`).
+- `GET /documents/{id}/pages/{page}` response shape (assumed `document_id, page, image_url, source_text, method, quality`).
+- Saved finding-response object fields (assumed `finding_id, action, explanation, document_ids, created_at`).
+- `reconciliation` object fields beyond "decimal strings, currency, source fact IDs, coverage qualification" (assumed `documented_balance, currency, source_fact_ids, coverage_note`).
+- `Recipient`, `ExportJob`, `Submission`, `ReviewerSubmissionSummary`, `ReviewEvent`, `ReviewerSubmissionDetail` field names (all assumed from the prose description of what each screen needs, per frontend.md F4).
+- Case activity-log entry shape (assumed `id, type, message, created_at`).
+
+None of these are load-bearing for UI-02 (fixture mode only needs internal consistency); they matter once UI-09 wires the HTTP adapter to a real API.
 
 ## P4. API workstream
 
