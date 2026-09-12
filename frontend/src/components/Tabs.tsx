@@ -62,7 +62,7 @@ export function Tabs({ tabs, idPrefix }: TabsProps) {
               tabIndex={selected ? 0 : -1}
               onClick={() => setActiveIndex(index)}
               onKeyDown={(e) => handleKeyDown(e, index)}
-              className={`-mb-px rounded-t-sm border-b-2 px-4 py-2 text-sm font-medium ${
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
                 selected ? "border-accent text-accent" : "border-transparent text-text-muted hover:text-text"
               }`}
             >
