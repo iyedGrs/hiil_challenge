@@ -65,7 +65,16 @@ function toAuthUser(user: AuthUser): AuthUser {
   return { id, email, role, display_name };
 }
 
-/** Cheap deterministic gate — no model call, matching B3 for fixture mode. */
+/** Matches a mention of the supplied goods/merchandise in French narrative text. */
+const GOODS_MENTION = /\bbiens?\b|\bmarchandises?\b|\bmatériel\b|\bfournitures?\b|\bproduits?\b/i;
+
+/**
+ * Cheap deterministic gate — no model call, matching B3 for fixture mode.
+ * Deterministic and consistent so the same claim always yields the same
+ * result: a narrative that never mentions the supplied goods stays
+ * `needs_information` until either the narrative is edited to mention them
+ * or the mapped follow-up question is answered (frontend.md F4/F5).
+ */
 function evaluateIntake(claim: Claim): Intake {
   const narrative = claim.narrative.trim();
   if (narrative.length < 30) {
@@ -80,6 +89,17 @@ function evaluateIntake(claim: Claim): Intake {
       ],
     };
   }
+
+  const answeredGoods = claim.follow_up_answers.some(
+    (a) => a.question_id === "describe_goods" && a.answer.trim().length > 0,
+  );
+  if (!GOODS_MENTION.test(narrative) && !answeredGoods) {
+    return {
+      status: "needs_information",
+      questions: [{ id: "describe_goods", field: "narrative", message: "Quels biens ont été fournis ?" }],
+    };
+  }
+
   return { status: "ready", questions: [] };
 }
 

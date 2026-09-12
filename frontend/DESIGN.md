@@ -47,7 +47,7 @@ Contrast checked at AA (4.5:1) for text-on-background and text-on-soft-bg pairs 
 One family (Operate-mode guidance: a well-tuned sans carries headings, labels, body, and data — no display/body pairing, no invented brand face). System font stack — loads instantly, renders correctly for French and has broad Arabic glyph coverage for embedded source-document text without shipping a webfont for a two-day-build compliance tool.
 
 ```
---font-sans: -apple-system, "Segoe UI", Roboti, Roboto, "Noto Sans Arabic", "Noto Sans", Arial, sans-serif;
+--font-sans: -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", "Noto Sans", Arial, sans-serif;
 --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
 ```
 

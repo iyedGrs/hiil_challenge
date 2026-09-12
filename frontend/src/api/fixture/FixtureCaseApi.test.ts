@@ -54,4 +54,80 @@ describe("FixtureCaseApi", () => {
       currency: "TND",
     });
   });
+
+  const BASE_CLAIM = {
+    case_type: "unpaid_goods_invoice",
+    claimant_name: "Demo Supplier",
+    counterparty_name: "Demo Customer",
+    claimed_amount: "20000.000",
+    currency: "TND",
+    dates: { contract: null, delivery: null, invoice: null, payment_due: null },
+    requested_outcome: "payment",
+    follow_up_answers: [],
+  };
+
+  describe("intake gate", () => {
+    beforeEach(async () => {
+      await api.login("amina.preparer@example.tn", FIXTURE_DEMO_PASSWORD);
+    });
+
+    it("rejects an unsupported case type with 422 UNSUPPORTED_CASE_TYPE before creating a case", async () => {
+      await expect(
+        api.createCase({
+          ...BASE_CLAIM,
+          case_type: "personal_injury",
+          narrative: "Une description suffisamment longue pour dépasser le seuil minimal de trente caractères.",
+        }),
+      ).rejects.toMatchObject({ status: 422, code: "UNSUPPORTED_CASE_TYPE" });
+    });
+
+    it("asks what goods were supplied when the narrative never mentions them", async () => {
+      const { intake } = await api.createCase({
+        ...BASE_CLAIM,
+        narrative: "Le client n'a pas payé la facture correspondant à la commande passée en juin.",
+      });
+      expect(intake.status).toBe("needs_information");
+      expect(intake.questions).toEqual([
+        { id: "describe_goods", field: "narrative", message: "Quels biens ont été fournis ?" },
+      ]);
+    });
+
+    it("becomes ready once the narrative is edited to mention the goods", async () => {
+      const created = await api.createCase({
+        ...BASE_CLAIM,
+        narrative: "Le client n'a pas payé la facture correspondant à la commande passée en juin.",
+      });
+      expect(created.intake.status).toBe("needs_information");
+
+      const updated = await api.updateClaim(created.case_id, created.revision, {
+        ...BASE_CLAIM,
+        narrative: "Nous avons fourni des biens (mobilier de bureau) et la facture reste impayée.",
+      });
+      expect(updated.intake.status).toBe("ready");
+      expect(updated.revision).toBe(created.revision + 1);
+    });
+
+    it("becomes ready once the mapped follow-up question is answered instead", async () => {
+      const created = await api.createCase({
+        ...BASE_CLAIM,
+        narrative: "Le client n'a pas payé la facture correspondant à la commande passée en juin.",
+      });
+
+      const updated = await api.updateClaim(created.case_id, created.revision, {
+        ...BASE_CLAIM,
+        narrative: "Le client n'a pas payé la facture correspondant à la commande passée en juin.",
+        follow_up_answers: [{ question_id: "describe_goods", answer: "Du mobilier de bureau." }],
+      });
+      expect(updated.intake.status).toBe("ready");
+    });
+
+    it("reuses the cached gate result for an unchanged claim revision", async () => {
+      const created = await api.createCase({
+        ...BASE_CLAIM,
+        narrative: "Le client n'a pas payé la facture correspondant à la commande passée en juin.",
+      });
+      const checked = await api.checkIntake(created.case_id, created.revision);
+      expect(checked).toEqual(created.intake);
+    });
+  });
 });
