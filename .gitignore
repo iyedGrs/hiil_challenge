@@ -1,3 +1,25 @@
 stale
 node_modules
 .venv
+
+# --- Local environment (spec/local-dev.md L3) ---
+# .env holds local secrets; .env.example is committed documentation.
+.env
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# --- Frontend build output ---
+dist/
+
+# --- OS noise ---
+.DS_Store
+
+# --- Local private/demo data (real storage is the private_files volume) ---
+data/
+private/
+backend/data/
+backend/private/
