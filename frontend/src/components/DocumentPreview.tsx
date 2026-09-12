@@ -113,7 +113,7 @@ export function DocumentPreview({ document, page, onPageChange }: DocumentPrevie
             {state.page.source_text ? (
               <pre
                 dir="auto"
-                className="whitespace-pre-wrap break-words rounded-sm border-l-2 border-border-strong bg-surface-muted p-3 text-sm text-text"
+                className="whitespace-pre-wrap break-words rounded-sm border border-border bg-surface-muted p-3 text-sm text-text"
               >
                 {state.page.source_text}
               </pre>
