@@ -130,4 +130,91 @@ describe("FixtureCaseApi", () => {
       expect(checked).toEqual(created.intake);
     });
   });
+
+  describe("documents (UI-04)", () => {
+    const CASE_ID = "CASE_001"; // seeded demo case, revision 1, 5 documents
+
+    beforeEach(async () => {
+      await api.login("amina.preparer@example.tn", FIXTURE_DEMO_PASSWORD);
+    });
+
+    function pdf(name: string, size = 1024): File {
+      return new File([new Uint8Array(size)], name, { type: "application/pdf" });
+    }
+
+    it("uploads a document and chains the returned revision", async () => {
+      const first = await api.uploadDocument(CASE_ID, 1, pdf("piece_1.pdf"));
+      expect(first.duplicate).toBe(false);
+      expect(first.revision).toBe(2);
+
+      const second = await api.uploadDocument(CASE_ID, first.revision, pdf("piece_2.pdf"));
+      expect(second.duplicate).toBe(false);
+      expect(second.revision).toBe(3);
+    });
+
+    it("rejects an upload against a stale revision with REVISION_CONFLICT", async () => {
+      await api.uploadDocument(CASE_ID, 1, pdf("piece_1.pdf"));
+      await expect(api.uploadDocument(CASE_ID, 1, pdf("piece_2.pdf"))).rejects.toMatchObject({
+        status: 409,
+        code: "REVISION_CONFLICT",
+      });
+    });
+
+    it("returns duplicate:true without bumping the revision for a same name/size upload", async () => {
+      const first = await api.uploadDocument(CASE_ID, 1, pdf("piece_1.pdf", 2048));
+      const dup = await api.uploadDocument(CASE_ID, first.revision, pdf("piece_1.pdf", 2048));
+      expect(dup.duplicate).toBe(true);
+      expect(dup.revision).toBe(first.revision);
+      expect(dup.document.document_id).toBe(first.document.document_id);
+    });
+
+    it("rejects an unsupported MIME type with 415 UNSUPPORTED_FILE", async () => {
+      const file = new File(["x"], "malware.exe", { type: "application/x-msdownload" });
+      await expect(api.uploadDocument(CASE_ID, 1, file)).rejects.toMatchObject({
+        status: 415,
+        code: "UNSUPPORTED_FILE",
+      });
+    });
+
+    it("rejects a file over the per-file byte limit with 413 FILE_LIMIT", async () => {
+      const config = await api.getConfig();
+      const oversized = pdf("gros_fichier.pdf", config.limits.max_file_bytes + 1);
+      await expect(api.uploadDocument(CASE_ID, 1, oversized)).rejects.toMatchObject({
+        status: 413,
+        code: "FILE_LIMIT",
+      });
+    });
+
+    it("rejects a new file once the active-file count limit is reached", async () => {
+      const config = await api.getConfig();
+      let revision = 1;
+      // 5 seeded documents already active; fill up to the limit.
+      for (let i = 0; i < config.limits.max_active_files - 5; i += 1) {
+        const result = await api.uploadDocument(CASE_ID, revision, pdf(`extra_${i}.pdf`));
+        revision = result.revision;
+      }
+      await expect(api.uploadDocument(CASE_ID, revision, pdf("one_too_many.pdf"))).rejects.toMatchObject({
+        status: 413,
+        code: "FILE_LIMIT",
+      });
+    });
+
+    it("deletes a document and chains the revision", async () => {
+      const result = await api.deleteDocument(CASE_ID, "DOC_001", 1);
+      expect(result.revision).toBe(2);
+      const detail = await api.getCase(CASE_ID);
+      expect(detail.documents.find((d) => d.document_id === "DOC_001")?.active).toBe(false);
+    });
+
+    it("returns a page preview with source text in the right method/quality shape", async () => {
+      const page = await api.getDocumentPage("DOC_001", 1);
+      expect(page.source_text).toBeTruthy();
+      expect(page.method).toBe("embedded_text");
+    });
+
+    it("returns the seeded Arabic page text unchanged", async () => {
+      const page = await api.getDocumentPage("DOC_005", 1);
+      expect(page.source_text).toContain("نطالب");
+    });
+  });
 });

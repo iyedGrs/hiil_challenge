@@ -9,35 +9,43 @@ export interface TabItem {
 interface TabsProps {
   tabs: TabItem[];
   idPrefix: string;
+  /** Controlled active tab id (e.g. from a `?tab=` search param); omit for internal state. */
+  activeId?: string;
+  onActiveChange?: (id: string) => void;
 }
 
 /**
- * Accessible tab bar skeleton (workspace tabs land in a later PR — this is the
- * roles/keyboard-nav shell, per frontend.md F4 "Documents, Checks, Activity, Submit").
+ * Accessible tab bar (roles/keyboard-nav per WAI-ARIA tabs pattern). Supports
+ * an optional controlled `activeId` so a route can deep-link to a tab
+ * (frontend.md FE-05: `?tab=documents&doc=...&page=...`).
  */
-export function Tabs({ tabs, idPrefix }: TabsProps) {
-  const [activeIndex, setActiveIndex] = useState(0);
+export function Tabs({ tabs, idPrefix, activeId, onActiveChange }: TabsProps) {
+  const [internalIndex, setInternalIndex] = useState(0);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  function focusTab(index: number): void {
+  const controlledIndex = activeId !== undefined ? tabs.findIndex((t) => t.id === activeId) : -1;
+  const activeIndex = controlledIndex >= 0 ? controlledIndex : internalIndex;
+
+  function selectIndex(index: number, focus: boolean): void {
     const next = (index + tabs.length) % tabs.length;
-    setActiveIndex(next);
-    tabRefs.current[next]?.focus();
+    if (onActiveChange) onActiveChange(tabs[next].id);
+    else setInternalIndex(next);
+    if (focus) tabRefs.current[next]?.focus();
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number): void {
     if (event.key === "ArrowRight") {
       event.preventDefault();
-      focusTab(index + 1);
+      selectIndex(index + 1, true);
     } else if (event.key === "ArrowLeft") {
       event.preventDefault();
-      focusTab(index - 1);
+      selectIndex(index - 1, true);
     } else if (event.key === "Home") {
       event.preventDefault();
-      focusTab(0);
+      selectIndex(0, true);
     } else if (event.key === "End") {
       event.preventDefault();
-      focusTab(tabs.length - 1);
+      selectIndex(tabs.length - 1, true);
     }
   }
 
@@ -60,7 +68,7 @@ export function Tabs({ tabs, idPrefix }: TabsProps) {
               aria-selected={selected}
               aria-controls={panelId}
               tabIndex={selected ? 0 : -1}
-              onClick={() => setActiveIndex(index)}
+              onClick={() => selectIndex(index, false)}
               onKeyDown={(e) => handleKeyDown(e, index)}
               className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
                 selected ? "border-accent text-accent" : "border-transparent text-text-muted hover:text-text"

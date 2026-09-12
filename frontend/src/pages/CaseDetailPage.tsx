@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { caseApi } from "../api";
 import { ApiError } from "../api/ApiError";
-import type { CaseDetail, Claim } from "../api/types";
+import type { CaseDetail, Claim, DocumentRecord } from "../api/types";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
+import { DocumentWorkspace } from "../components/DocumentWorkspace";
 import { IntakeForm, type IntakeFormResult } from "../components/IntakeForm";
 import { Tabs } from "../components/Tabs";
 import { useSession } from "../session/SessionContext";
@@ -24,6 +25,7 @@ export function CaseDetailPage() {
   const { config } = useSession();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [banner, setBanner] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   function load(): void {
     if (!caseId) return;
@@ -65,6 +67,36 @@ export function CaseDetailPage() {
       }
       return { ok: false, fieldErrors: [], message: "Une erreur inattendue s'est produite. Réessayez." };
     }
+  }
+
+  function updateDocuments(newRevision: number, documents: DocumentRecord[]): void {
+    setState((prev) =>
+      prev.status === "loaded" ? { status: "loaded", detail: { ...prev.detail, revision: newRevision, documents } } : prev,
+    );
+  }
+
+  function selectDocument(documentId: string | null): void {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", "documents");
+      if (documentId) {
+        next.set("doc", documentId);
+        next.set("page", "1");
+      } else {
+        next.delete("doc");
+        next.delete("page");
+      }
+      return next;
+    });
+  }
+
+  function selectPage(page: number): void {
+    if (page < 1) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("page", String(page));
+      return next;
+    });
   }
 
   async function handleRetryGate(): Promise<void> {
@@ -156,21 +188,42 @@ export function CaseDetailPage() {
         </div>
       )}
 
-      {!notReady && (
-        <div className="mt-6">
+      {/*
+       * Uploads stay available while intake needs information — frontend.md
+       * F4: "If intake requires more information, keep the draft and
+       * uploaded files." Only the analysis-dependent tabs stay placeholders.
+       */}
+      <div className="mt-6">
+        {config ? (
           <Tabs
             idPrefix="case-workspace"
+            activeId={searchParams.get("tab") ?? "documents"}
+            onActiveChange={(id) => setSearchParams((prev) => new URLSearchParams({ ...Object.fromEntries(prev), tab: id }))}
             tabs={WORKSPACE_TABS.map((tab) => ({
               ...tab,
-              panel: (
-                <p className="text-sm text-text-muted">
-                  Cette section sera construite dans une prochaine étape.
-                </p>
-              ),
+              panel:
+                tab.id === "documents" && caseId ? (
+                  <DocumentWorkspace
+                    caseId={caseId}
+                    revision={detail.revision}
+                    documents={detail.documents}
+                    config={config}
+                    onUpdate={updateDocuments}
+                    onReload={load}
+                    selectedDocumentId={searchParams.get("doc")}
+                    selectedPage={Number(searchParams.get("page") ?? "1") || 1}
+                    onSelectDocument={selectDocument}
+                    onSelectPage={selectPage}
+                  />
+                ) : (
+                  <p className="text-sm text-text-muted">Cette section sera construite dans une prochaine étape.</p>
+                ),
             }))}
           />
-        </div>
-      )}
+        ) : (
+          <div className="h-32 animate-pulse rounded-md bg-surface-muted" />
+        )}
+      </div>
     </div>
   );
 }
