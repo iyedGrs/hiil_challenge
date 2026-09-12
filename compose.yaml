@@ -1,0 +1,113 @@
+# Local integrated environment for the dispute-preparation demo.
+# Authoritative spec: spec/local-dev.md L1 (services), L3 (environment), L4 (startup).
+#
+# Copy .env.example to .env and fill in local values first (.env is git-ignored).
+#
+# Startup order (L4) - migrations and seeding are deliberately NOT part of any
+# service command; they run as one-off containers:
+#   docker compose build
+#   docker compose up -d --wait db
+#   docker compose run --rm api alembic upgrade head
+#   docker compose run --rm api python -m app.seed_demo
+#   docker compose up -d api worker            # add `web` once frontend/ exists
+#   docker compose ps
+
+name: dispute-demo
+
+services:
+  # PostgreSQL 16: application state and the job queue (L1).
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dispute_demo}
+      POSTGRES_USER: ${POSTGRES_USER:-dispute_demo}
+      # No default on purpose: Compose fails fast if .env has no local password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - copy .env.example to .env and set a locally generated value}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Port 5432 is intentionally NOT published (L1: "do not expose by default").
+    # api and worker reach it over the Compose network as db:5432. Uncomment only
+    # if you must attach a host database client, and expect a host port clash
+    # with any local PostgreSQL install.
+    # ports:
+    #   - "5432:5432"
+    # A running container does not prove PostgreSQL accepts connections (L4), so
+    # api/worker wait on this check through service_healthy.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # FastAPI: sessions, uploads, read endpoints. http://localhost:8000/docs
+  api:
+    build:
+      context: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    # Preferred dev loop: swap the command above for the --reload line below AND
+    # uncomment the ./backend bind mount under volumes. Both stay off by default
+    # because mounting ./backend over /srv shadows the application installed in
+    # the image - the container would then run whatever sits on the host,
+    # including paths excluded by .dockerignore or a half-written module from a
+    # parallel edit. Enable the pair together, never the mount alone: plain
+    # uvicorn gains nothing from it.
+    # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /srv/app
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Same private file volume as worker (L4): originals written by api are read
+      # by the worker's extraction/OCR path.
+      - private_files:/data/private
+      # - ./backend:/srv   # dev-only, pairs with the --reload command above
+
+  # Jobs, extraction/OCR, AI adapter, validation, export. No public port (L1).
+  worker:
+    build:
+      context: ./backend
+    command: python -m app.worker
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - private_files:/data/private
+
+  # React/Vite dev server. Owned by the UI contributor; ./frontend does not exist
+  # yet, so this service sits behind a profile and is skipped by a plain
+  # `docker compose up -d api worker` (and by `up -d` with no profile enabled).
+  # Start it with `docker compose --profile web up -d web` once frontend/ exists.
+  # Deliberately no env_file here: .env holds AI_API_KEY and FILE_STORAGE_ROOT,
+  # and L1 forbids giving the web container file storage or provider credentials.
+  # Only the two variables Vite actually needs are passed through, and the private
+  # volume is not mounted.
+  web:
+    profiles: ["web"]
+    image: node:22-alpine
+    working_dir: /app
+    environment:
+      VITE_DATA_MODE: ${VITE_DATA_MODE:-fixture}
+      API_PROXY_TARGET: ${API_PROXY_TARGET:-http://api:8000}
+    # npm ci when a lockfile is committed (L5), npm install for the first run.
+    # Vite must listen on 0.0.0.0 to be reachable from the host (L4).
+    command: >
+      sh -c "if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      && npm run dev -- --host 0.0.0.0 --port 5173"
+    volumes:
+      # Host node_modules is reused; add an anonymous volume at /app/node_modules
+      # if host and container platforms ever disagree on native modules.
+      - ./frontend:/app
+    ports:
+      - "5173:5173"
+    # No depends_on api: the browser calls relative /api/... and the Vite proxy
+    # resolves API_PROXY_TARGET per request (L1), so web can start in any order.
+
+volumes:
+  # PostgreSQL data; survives `docker compose stop` and `down` (L6).
+  postgres_data:
+  # Private case files (FILE_STORAGE_ROOT=/data/private), shared by api + worker.
+  private_files:

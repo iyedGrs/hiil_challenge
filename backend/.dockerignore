@@ -1,0 +1,35 @@
+# Build context hygiene for backend/Dockerfile.
+# Keeps caches, virtualenvs, local secrets and local case data out of the image.
+
+# Python caches / build artefacts
+__pycache__/
+**/__pycache__/
+tests/__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local interpreters
+.venv/
+venv/
+env/
+
+# Secrets must never be baked into the image (spec/local-dev.md L3)
+.env
+.env.*
+
+# Local private data / demo artefacts; /data/private is a mounted volume
+data/
+private/
+uploads/
+storage/
+*.sqlite3
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
