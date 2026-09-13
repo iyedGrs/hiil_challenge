@@ -77,8 +77,10 @@ def register_default_handlers() -> None:
     tests may call it freely.
     """
     from app.pipeline.analysis import handle_analysis_job
+    from app.pipeline.export import handle_export_job
 
     register_handler(JobKind.analysis, handle_analysis_job)
+    register_handler(JobKind.export, handle_export_job)
 
 
 def worker_identity() -> str:

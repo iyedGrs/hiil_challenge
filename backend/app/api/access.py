@@ -97,3 +97,33 @@ def load_owned_document(db: DbSession, document_id: str, user: User) -> Document
     if document is None:
         raise not_found()
     return document
+
+
+def load_accessible_document(db: DbSession, document_id: str, user: User) -> Document:
+    """Return ``document_id`` if ``user`` may read it, else 404 (spec/backend.md B10).
+
+    Two authorized paths, and no others:
+
+    * the signed-in **preparer owns the case** the document belongs to;
+    * the signed-in **reviewer received a submission** that froze this document.
+
+    The second path is what "submitted originals remain accessible only through
+    authorized snapshot access" means in practice (B10): a reviewer can open the
+    evidence they were sent, and nothing else. Access to one submission grants no
+    access to drafts, to later revisions, or to any other case.
+    """
+    from app.domain.enums import Role
+    from app.models.submission import Submission, SubmissionDocument
+
+    if user.role is Role.reviewer:
+        document = db.scalar(
+            select(Document)
+            .join(SubmissionDocument, SubmissionDocument.document_id == Document.id)
+            .join(Submission, Submission.id == SubmissionDocument.submission_id)
+            .where(Document.id == document_id, Submission.reviewer_id == user.id)
+        )
+        if document is None:
+            raise not_found()
+        return document
+
+    return load_owned_document(db, document_id, user)

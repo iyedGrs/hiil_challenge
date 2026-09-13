@@ -21,8 +21,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, File, Form, Response, UploadFile
 from sqlalchemy import func, select
 
-from app.api.access import load_owned_case, load_owned_document, require_matching_revision
-from app.api.deps import CsrfDep, DbDep, PreparerDep
+from app.api.access import (
+    load_accessible_document,
+    load_owned_case,
+    require_matching_revision,
+)
+from app.api.deps import CsrfDep, DbDep, PreparerDep, UserDep
 from app.api.views import document_out, document_types, page_out
 from app.config import get_settings
 from app.domain.enums import DocumentState
@@ -334,8 +338,11 @@ def delete_document(
     "/documents/{document_id}/content",
     summary="Download or preview the original bytes of a document",
 )
-def get_document_content(document_id: str, user: PreparerDep, db: DbDep) -> Response:
-    """``GET /api/documents/{id}/content`` (B9): authorized original bytes.
+def get_document_content(document_id: str, user: UserDep, db: DbDep) -> Response:
+    """``GET /api/documents/{id}/content`` (B9, B10): authorized original bytes.
+
+    Readable by the owning preparer, or by a reviewer who received a submission
+    that froze this document (B10). Anyone else gets 404.
 
     ``Content-Disposition: inline`` lets the browser preview PDFs/images
     directly; the sanitized display name is offered as the suggested filename
@@ -344,7 +351,7 @@ def get_document_content(document_id: str, user: PreparerDep, db: DbDep) -> Resp
     injection risk.
     """
     settings = get_settings()
-    document = load_owned_document(db, document_id, user)
+    document = load_accessible_document(db, document_id, user)
     data = read_bytes(settings.file_storage_root, document.storage_key)
     encoded_name = quote(document.display_name)
     disposition = f"inline; filename*=UTF-8''{encoded_name}"
@@ -361,7 +368,7 @@ def get_document_content(document_id: str, user: PreparerDep, db: DbDep) -> Resp
     summary="Read one page's stored text and quality metadata",
 )
 def get_document_page(
-    document_id: str, page_number: int, user: PreparerDep, db: DbDep
+    document_id: str, page_number: int, user: UserDep, db: DbDep
 ) -> PageOut:
     """``GET /api/documents/{id}/pages/{page}`` (B4, B9).
 
@@ -369,7 +376,7 @@ def get_document_page(
     ``image_url`` pointing at the rendered-page route when the page was OCR'd
     from a scan.
     """
-    document = load_owned_document(db, document_id, user)
+    document = load_accessible_document(db, document_id, user)
     page = _load_page(db, document, page_number)
     return page_out(page)
 
@@ -379,7 +386,7 @@ def get_document_page(
     summary="Preview the rendered image of one scanned page",
 )
 def get_document_page_image(
-    document_id: str, page_number: int, user: PreparerDep, db: DbDep
+    document_id: str, page_number: int, user: UserDep, db: DbDep
 ) -> Response:
     """Serve the rendered PNG for a scanned page (B4, B9).
 
@@ -388,7 +395,7 @@ def get_document_page_image(
     owner check as every other document route.
     """
     settings = get_settings()
-    document = load_owned_document(db, document_id, user)
+    document = load_accessible_document(db, document_id, user)
     page = _load_page(db, document, page_number)
     if page.image_key is None:
         raise not_found()
