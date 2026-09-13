@@ -78,7 +78,9 @@ def test_all_checks_have_no_legal_reference_ids(db: Session) -> None:
         assert check.legal_reference_ids == []
         assert check.review_status == "draft"
         assert check.applies_when == {"case_type": "unpaid_goods_invoice"}
-        assert check.basis in {"checklist", "evidence_guidance"}
+        # ``reconciliation`` marks a check that Decimal code decides on its own;
+        # it is never handed to the model (spec/backend.md B7).
+        assert check.basis in {"checklist", "evidence_guidance", "reconciliation"}
 
     # No legal references were shipped either: the safer, spec-preferred choice
     # when no reviewed reference exists (B5).
@@ -145,7 +147,9 @@ def test_config_reports_unvalidated_legal_coverage_through_the_loaded_pack(
     response = client.get("/api/config")
 
     assert response.status_code == 200
-    assert response.json()["legal_coverage"] == LegalCoverage.unvalidated.value
+    assert response.json()["legal_coverage"] == {
+        CaseType.unpaid_goods_invoice.value: LegalCoverage.unvalidated.value
+    }
 
     # The pack row backing this answer is real, not a mock.
     pack = db.get(LegalPack, "tn-goods-v1")
@@ -154,8 +158,14 @@ def test_config_reports_unvalidated_legal_coverage_through_the_loaded_pack(
 
 
 def test_config_falls_back_to_unvalidated_when_no_pack_is_loaded(client: TestClient) -> None:
-    """With an empty ``legal_packs`` table, ``/config`` still answers safely (B5)."""
+    """With an empty ``legal_packs`` table, ``/config`` still answers safely (B5).
+
+    Every supported case type is still present in the map: a missing pack means
+    ``unvalidated``, never an absent key the client has to interpret.
+    """
     response = client.get("/api/config")
 
     assert response.status_code == 200
-    assert response.json()["legal_coverage"] == LegalCoverage.unvalidated.value
+    assert response.json()["legal_coverage"] == {
+        CaseType.unpaid_goods_invoice.value: LegalCoverage.unvalidated.value
+    }

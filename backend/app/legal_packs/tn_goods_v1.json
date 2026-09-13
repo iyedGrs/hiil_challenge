@@ -62,7 +62,7 @@
       "legal_reference_ids": [],
       "review_status": "draft",
       "applies_when": {"case_type": "unpaid_goods_invoice"},
-      "subject_type": "payment",
+      "subject_type": "invoice",
       "satisfied_by": [
         {"type": "bank_transfer_receipt", "required_links": ["parties", "transaction"]},
         {"type": "payment_confirmation_correspondence", "required_links": ["parties", "transaction"]},
@@ -88,6 +88,20 @@
       ],
       "actions": ["add_evidence", "explain_unavailable", "disagree"],
       "sort_order": 50
+    },
+    {
+      "check_id": "claim_amount_matches_records",
+      "label": "Claimed amount agrees with the uploaded records",
+      "basis": "reconciliation",
+      "legal_reference_ids": [],
+      "review_status": "draft",
+      "applies_when": {"case_type": "unpaid_goods_invoice"},
+      "subject_type": "invoice",
+      "satisfied_by": [
+        {"type": "documented_balance_matches_claim", "required_links": ["invoice", "payments"]}
+      ],
+      "actions": ["add_evidence", "correct_claim", "explain_unavailable", "disagree"],
+      "sort_order": 60
     }
   ]
 }

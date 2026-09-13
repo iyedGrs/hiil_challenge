@@ -29,18 +29,24 @@ logger = logging.getLogger("app.api.config")
 router = APIRouter(tags=["config"])
 
 
-def _current_legal_coverage(db: DbDep) -> LegalCoverage:
-    """Return the real coverage of the configured legal pack (spec/backend.md B5).
+def _current_legal_coverage(db: DbDep) -> dict[str, LegalCoverage]:
+    """Return per-case-type coverage of the configured legal pack (B5).
 
     Queries ``legal_packs`` for ``settings.legal_pack_version`` instead of a
-    hardcoded literal, so a future reviewed pack automatically flips this to
-    ``validated`` without a code change. Any lookup failure -- no pack loaded
-    yet, table not migrated, or a stale/unreachable connection -- falls back to
-    ``unvalidated`` rather than raising: B5 requires disabling claims of
-    legal-requirement verification whenever a validated pack is unavailable,
-    and ``GET /config`` must never 500 because of it.
+    hardcoded literal, so a future reviewed pack automatically flips a case type
+    to ``validated`` without a code change. Every supported case type is always
+    present in the map and defaults to ``unvalidated``.
+
+    Any lookup failure -- no pack loaded yet, table not migrated, or a
+    stale/unreachable connection -- falls back to ``unvalidated`` rather than
+    raising: B5 requires disabling claims of legal-requirement verification
+    whenever a validated pack is unavailable, and ``GET /config`` must never 500
+    because of it.
     """
     settings = get_settings()
+    coverage: dict[str, LegalCoverage] = {
+        case_type.value: LegalCoverage.unvalidated for case_type in CaseType
+    }
     try:
         pack = db.get(LegalPack, settings.legal_pack_version)
     except SQLAlchemyError:
@@ -49,10 +55,10 @@ def _current_legal_coverage(db: DbDep) -> LegalCoverage:
             settings.legal_pack_version,
             exc_info=True,
         )
-        return LegalCoverage.unvalidated
-    if pack is None:
-        return LegalCoverage.unvalidated
-    return pack.coverage
+        return coverage
+    if pack is not None:
+        coverage[pack.case_type.value] = pack.coverage
+    return coverage
 
 
 @router.get("/config", response_model=ConfigOut, summary="Client bootstrap configuration")
@@ -73,8 +79,8 @@ def read_config(db: DbDep) -> ConfigOut:
         currencies=list(Currency),
         requested_outcomes=list(RequestedOutcome),
         limits=LimitsOut(
-            max_case_files=settings.max_case_files,
-            max_case_pages=settings.max_case_pages,
+            max_active_files=settings.max_case_files,
+            max_total_pages=settings.max_case_pages,
             max_file_bytes=settings.max_file_bytes,
             max_case_bytes=settings.max_case_bytes,
             supported_mime_types=list(settings.supported_mime_types),

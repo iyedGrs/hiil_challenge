@@ -161,13 +161,20 @@ def csrf_invalid(message: str | None = None) -> ApiError:
     return ApiError(CSRF_INVALID, message)
 
 
-def _validation_field_path(location: tuple[object, ...]) -> str:
-    """Render a Pydantic error location as a dotted field path.
+#: Location segments dropped when rendering a field path. ``body`` is Pydantic's
+#: marker for "in the request body" and ``claim`` is the wrapper key used by
+#: ``PATCH /cases/{id}/claim``. Removing both makes ``field_errors`` claim-relative
+#: (``claimed_amount``, ``dates.invoice``), which is what the UI anchors a message
+#: to its input with. ``query``/``path`` markers are kept, because there a client
+#: does need to know the value did not come from the body.
+_DROPPED_LOCATION_SEGMENTS: Final[frozenset[str]] = frozenset({"body", "claim"})
 
-    The leading ``body``/``query`` marker is kept so clients can tell a body
-    field from a query parameter, matching the ``field_errors`` contract.
-    """
+
+def _validation_field_path(location: tuple[object, ...]) -> str:
+    """Render a Pydantic error location as a claim-relative dotted field path."""
     parts = [str(part) for part in location]
+    while parts and parts[0] in _DROPPED_LOCATION_SEGMENTS:
+        parts.pop(0)
     return ".".join(parts) if parts else "body"
 
 

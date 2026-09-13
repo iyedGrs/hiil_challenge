@@ -50,8 +50,8 @@ def test_config_exposes_documented_keys(client: TestClient) -> None:
         RequestedOutcome.payment_plan.value,
     }
     assert set(body["limits"]) == {
-        "max_case_files",
-        "max_case_pages",
+        "max_active_files",
+        "max_total_pages",
         "max_file_bytes",
         "max_case_bytes",
         "supported_mime_types",
@@ -61,8 +61,11 @@ def test_config_exposes_documented_keys(client: TestClient) -> None:
         "image/jpeg",
         "image/png",
     ]
-    # No reviewed legal pack is loaded in this slice (spec/backend.md B5).
-    assert body["legal_coverage"] == LegalCoverage.unvalidated.value
+    # Coverage is reported per case type; the shipped pack is unreviewed, so the
+    # only supported category stays ``unvalidated`` (spec/backend.md B5).
+    assert body["legal_coverage"] == {
+        CaseType.unpaid_goods_invoice.value: LegalCoverage.unvalidated.value
+    }
     assert body["execution_mode"] == ExecutionMode.fixture.value
 
 
@@ -165,7 +168,8 @@ def test_unknown_field_on_login_body_returns_invalid_input(client: TestClient) -
     assert error["code"] == INVALID_INPUT
     assert error["retryable"] is False
     fields = {entry["field"] for entry in error["field_errors"]}
-    assert "body.role" in fields
+    # Paths are claim/body-relative so the UI can anchor a message to its input.
+    assert "role" in fields
     # The submitted values are never echoed back (spec/backend.md B9).
     assert "reviewer" not in str(error["field_errors"])
 
@@ -177,7 +181,7 @@ def test_missing_field_on_login_body_returns_field_errors(client: TestClient) ->
     assert response.status_code == 422
     error = response.json()["error"]
     assert error["code"] == INVALID_INPUT
-    assert {entry["field"] for entry in error["field_errors"]} == {"body.password"}
+    assert {entry["field"] for entry in error["field_errors"]} == {"password"}
 
 
 def test_password_hash_is_salted_and_verifiable() -> None:
