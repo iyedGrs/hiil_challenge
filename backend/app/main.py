@@ -25,6 +25,7 @@ from app.api import (
     config as config_routes,
     documents as document_routes,
     health,
+    submissions as handoff_routes,
 )
 from app.config import Settings, get_settings
 from app.db import session_scope
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(case_routes.router, prefix=API_PREFIX)
     app.include_router(document_routes.router, prefix=API_PREFIX)
     app.include_router(analysis_routes.router, prefix=API_PREFIX)
+    app.include_router(handoff_routes.router, prefix=API_PREFIX)
 
     return app
 
