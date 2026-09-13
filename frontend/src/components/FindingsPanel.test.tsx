@@ -167,13 +167,61 @@ describe("FindingsPanel", () => {
     });
     render(<FindingsPanel detail={detail} onUpdate={vi.fn()} onReload={vi.fn()} onOpenDocumentPage={vi.fn()} />);
 
-    expect(screen.getByText("Constat satisfait")).toBeInTheDocument();
-    expect(screen.getByText("Constat contredit")).toBeInTheDocument();
+    // Scoped to the findings list: the verdict block above it also names every
+    // open issue, as a jump-to-finding shortcut.
+    const findings = () => within(screen.getByRole("list", { name: "Constats" }));
+    expect(findings().getByText("Constat satisfait")).toBeInTheDocument();
+    expect(findings().getByText("Constat contredit")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Filtrer par résultat"), "contradicted");
 
-    expect(screen.queryByText("Constat satisfait")).not.toBeInTheDocument();
-    expect(screen.getByText("Constat contredit")).toBeInTheDocument();
+    expect(findings().queryByText("Constat satisfait")).not.toBeInTheDocument();
+    expect(findings().getByText("Constat contredit")).toBeInTheDocument();
+  });
+
+  it("jumps from a verdict label to the matching finding card", async () => {
+    const user = userEvent.setup();
+    const detail = baseDetail({
+      latest_analysis: {
+        analysis_id: "RUN_003",
+        case_id: "CASE_001",
+        revision: 1,
+        status: "ready",
+        execution_mode: "fixture",
+        checklist_version: "tn-goods-v1",
+        legal_coverage: "unvalidated",
+        coverage: { reviewed_pages: 1, unreadable_pages: 0, rejected_facts: 0 },
+        checks: [
+          {
+            check_id: "b",
+            subject_id: "s2",
+            subject_label: "Cohérence du montant",
+            finding_id: "finding_b",
+            result: "contradicted",
+            reason_code: "CONFLICT",
+            finding_status: "open",
+            delta: "new",
+            basis: "reconciliation",
+            message: "Écart détecté.",
+            evidence_refs: [],
+            reviewed_document_ids: [],
+            legal_reference_ids: [],
+            actions: ["disagree"],
+          },
+        ],
+        reconciliation: null,
+      },
+    });
+    render(<FindingsPanel detail={detail} onUpdate={vi.fn()} onReload={vi.fn()} onOpenDocumentPage={vi.fn()} />);
+
+    // The verdict panel is a named region; the finding card below it repeats the
+    // same subject label as its own disclosure header, so the query is scoped.
+    const verdict = within(screen.getByRole("region", { name: "1 point à traiter" }));
+    const chip = verdict.getByRole("button", { name: /Cohérence du montant/ });
+    await user.click(chip);
+
+    // The chip targets the card by its server-owned finding_id (FE-06).
+    expect(document.getElementById("finding-finding_b")).not.toBeNull();
   });
 
   it("shows a per-delta change-summary count alongside each finding's own delta badge", () => {
@@ -227,10 +275,11 @@ describe("FindingsPanel", () => {
     render(<FindingsPanel detail={detail} onUpdate={vi.fn()} onReload={vi.fn()} onOpenDocumentPage={vi.fn()} />);
 
     expect(screen.getByText("Changements depuis la dernière analyse")).toBeInTheDocument();
-    // Each finding keeps its own delta badge — never swapped between findings by position (FE-06).
-    const deliveryCard = screen.getByText("Preuve de livraison").closest("li")!;
+    // Each finding keeps its own delta badge, never swapped between findings by position (FE-06).
+    const findings = within(screen.getByRole("list", { name: "Constats" }));
+    const deliveryCard = findings.getByText("Preuve de livraison").closest("li")!;
     expect(within(deliveryCard).getByText("Résolu depuis la dernière analyse")).toBeInTheDocument();
-    const amountCard = screen.getByText("Cohérence du montant").closest("li")!;
+    const amountCard = findings.getByText("Cohérence du montant").closest("li")!;
     expect(within(amountCard).getByText("Toujours ouvert")).toBeInTheDocument();
   });
 

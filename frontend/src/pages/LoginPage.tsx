@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { Scales } from "@phosphor-icons/react";
 import { ApiError, dataMode } from "../api";
 import { FIXTURE_DEMO_PASSWORD, FIXTURE_USERS } from "../api/fixture/seed";
+import { Button } from "../components/Button";
 import { roleHome } from "../session/guards";
 import { useSession } from "../session/SessionContext";
 
@@ -35,9 +37,15 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
-      <div className="w-full max-w-sm rounded-md border border-border bg-surface p-8">
-        <h1 className="text-xl font-semibold text-text">Connexion</h1>
+    <div className="flex min-h-[100dvh] items-center justify-center bg-canvas px-4 py-10">
+      <div className="w-full max-w-sm rounded-md border border-border bg-surface p-8 shadow-lifted">
+        <span
+          aria-hidden="true"
+          className="flex size-10 items-center justify-center rounded-sm bg-accent-soft text-accent"
+        >
+          <Scales size={22} weight="fill" />
+        </span>
+        <h1 className="mt-4 text-xl font-semibold text-text">Connexion</h1>
         <p className="mt-1 text-sm text-text-muted">Préparation de dossiers de litige contractuel.</p>
 
         <form className="mt-6 flex flex-col gap-4" onSubmit={(e) => void handleSubmit(e)} noValidate>
@@ -53,7 +61,7 @@ export function LoginPage() {
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+              className="rounded-sm border border-border-control bg-surface px-3 py-2 text-base text-text transition-colors hover:border-text-muted"
             />
           </div>
 
@@ -71,7 +79,7 @@ export function LoginPage() {
               onChange={(event) => setPassword(event.target.value)}
               aria-describedby={error ? "login-error" : undefined}
               aria-invalid={error ? true : undefined}
-              className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+              className="rounded-sm border border-border-control bg-surface px-3 py-2 text-base text-text transition-colors hover:border-text-muted"
             />
           </div>
 
@@ -81,13 +89,9 @@ export function LoginPage() {
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="mt-2 rounded-sm bg-accent px-4 py-2 text-sm font-medium text-accent-contrast transition-colors hover:bg-accent-hover disabled:opacity-50"
-          >
+          <Button type="submit" pending={submitting} className="mt-2 w-full">
             {submitting ? "Connexion…" : "Se connecter"}
-          </button>
+          </Button>
         </form>
 
         {dataMode === "fixture" && (
@@ -96,7 +100,8 @@ export function LoginPage() {
             <ul className="mt-1 list-disc pl-4">
               {FIXTURE_USERS.map((seededUser) => (
                 <li key={seededUser.email}>
-                  {seededUser.email} — {FIXTURE_DEMO_PASSWORD}
+                  <span className="tabular">{seededUser.email}</span> · mot de passe :{" "}
+                  <span className="tabular">{FIXTURE_DEMO_PASSWORD}</span>
                 </li>
               ))}
             </ul>

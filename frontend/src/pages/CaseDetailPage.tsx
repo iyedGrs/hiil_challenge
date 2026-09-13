@@ -1,60 +1,47 @@
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import {
+  ArrowClockwise,
+  ArrowLeft,
+  ClockCounterClockwise,
+  Files,
+  ListChecks,
+  PaperPlaneTilt,
+  Scales,
+} from "@phosphor-icons/react";
 import { caseApi } from "../api";
 import { ApiError } from "../api/ApiError";
-import type { ActivityEvent, CaseDetail, Claim, DocumentRecord, FindingResponse } from "../api/types";
+import type { CaseDetail, Claim, DocumentRecord, FindingResponse } from "../api/types";
+import { ActivityDrawer } from "../components/ActivityDrawer";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
+import { CaseFlow, type FlowStep, type FlowStepState } from "../components/CaseFlow";
 import { DocumentWorkspace } from "../components/DocumentWorkspace";
 import { FindingsPanel } from "../components/FindingsPanel";
 import { IntakeForm, type IntakeFormResult } from "../components/IntakeForm";
 import { SubmissionPanel } from "../components/SubmissionPanel";
-import { Tabs } from "../components/Tabs";
+import { useToast } from "../components/Toast";
 import { useSession } from "../session/SessionContext";
-import { INTAKE_STATUS_LABEL, INTAKE_STATUS_TONE } from "../lib/intakeStatus";
+import { INTAKE_STATUS_LABEL } from "../lib/intakeStatus";
 import { READINESS_LABEL, READINESS_TONE } from "../lib/findingLabels";
+import { buildVerdict } from "../lib/verdict";
 
 type LoadState = { status: "loading" } | { status: "error"; message: string } | { status: "loaded"; detail: CaseDetail };
 
-/** "Activité" tab: the case's activity log, newest first (UI-08: surfaces reviewer clarification requests here too). */
-function ActivityTimeline({ activity }: { activity: ActivityEvent[] }) {
-  if (activity.length === 0) {
-    return <p className="text-sm text-text-muted">Aucune activité pour l'instant.</p>;
-  }
-  const sorted = [...activity].sort((a, b) => b.created_at.localeCompare(a.created_at));
-  return (
-    <ul className="flex flex-col gap-2">
-      {sorted.map((event) => (
-        <li
-          key={event.id}
-          className={`rounded-md border p-3 text-sm ${
-            event.type === "reviewer_clarification_requested"
-              ? "border-warning bg-warning-bg text-warning"
-              : "border-border bg-surface text-text"
-          }`}
-        >
-          <p className="tabular text-xs text-text-subtle">{new Date(event.created_at).toLocaleString("fr-FR")}</p>
-          <p className="mt-0.5" dir="auto">
-            {event.message}
-          </p>
-        </li>
-      ))}
-    </ul>
-  );
-}
+const STEP_IDS = ["claim", "documents", "checks", "submission"] as const;
+type StepId = (typeof STEP_IDS)[number];
 
-const WORKSPACE_TABS = [
-  { id: "documents", label: "Documents" },
-  { id: "checks", label: "Vérifications" },
-  { id: "activity", label: "Activité" },
-  { id: "submission", label: "Soumission" },
-];
+function isStepId(value: string | null): value is StepId {
+  return value !== null && (STEP_IDS as readonly string[]).includes(value);
+}
 
 export function CaseDetailPage() {
   const { caseId } = useParams<{ caseId: string }>();
   const { config } = useSession();
+  const { notify } = useToast();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [banner, setBanner] = useState<string | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   function load(): void {
@@ -73,6 +60,14 @@ export function CaseDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when navigating to a different case
   }, [caseId]);
 
+  function goToStep(id: StepId): void {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", id);
+      return next;
+    });
+  }
+
   async function handleSaveClaim(claim: Claim): Promise<IntakeFormResult> {
     if (state.status !== "loaded" || !caseId) return { ok: false, fieldErrors: [] };
     try {
@@ -85,6 +80,11 @@ export function CaseDetailPage() {
         detail: { ...state.detail, claim: result.claim, revision: result.revision, intake },
       });
       setBanner(null);
+      if (intake.status === "ready") {
+        notify("success", "Réclamation enregistrée. Vous pouvez passer aux pièces.");
+      } else {
+        notify("warning", "Réclamation enregistrée. Quelques précisions sont encore demandées ci-dessous.");
+      }
       return { ok: true };
     } catch (err) {
       if (err instanceof ApiError && err.code === "REVISION_CONFLICT") {
@@ -129,7 +129,7 @@ export function CaseDetailPage() {
     });
   }
 
-  /** Citation deep link from a finding card into the Documents tab (frontend.md FE-05). */
+  /** Citation deep link from a finding card into the Documents step (frontend.md FE-05). */
   function openDocumentPage(documentId: string, page: number): void {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -160,16 +160,17 @@ export function CaseDetailPage() {
 
   if (state.status === "loading") {
     return (
-      <div className="mx-auto max-w-4xl px-6 py-10">
-        <div className="h-8 w-64 animate-pulse rounded-sm bg-surface-muted" />
-        <div className="mt-4 h-32 animate-pulse rounded-md bg-surface-muted" />
+      <div className="mx-auto max-w-5xl px-6 py-8">
+        <div className="skeleton h-8 w-64 rounded-sm" />
+        <div className="skeleton mt-4 h-16 rounded-md" />
+        <div className="skeleton mt-5 h-64 rounded-md" />
       </div>
     );
   }
 
   if (state.status === "error") {
     return (
-      <div className="mx-auto max-w-4xl px-6 py-10">
+      <div className="mx-auto max-w-5xl px-6 py-8">
         <p role="alert" className="rounded-sm bg-danger-bg px-3 py-2 text-sm text-danger">
           {state.message}
         </p>
@@ -178,25 +179,122 @@ export function CaseDetailPage() {
   }
 
   const { detail } = state;
-  const notReady = detail.intake.status !== "ready";
+  const activeDocumentCount = detail.documents.filter((d) => d.active).length;
+  const analysis = detail.latest_analysis;
+  const verdict = analysis ? buildVerdict(analysis, detail.revision) : null;
+  const intakeReady = detail.intake.status === "ready";
+
+  const claimState: FlowStepState = intakeReady
+    ? "done"
+    : detail.intake.status === "not_checked"
+      ? "todo"
+      : "attention";
+
+  const checksState: FlowStepState = !verdict
+    ? "todo"
+    : verdict.tone === "success"
+      ? "done"
+      : "attention";
+
+  /*
+   * The automatic readiness verdict gates transmission, so it drives that
+   * step's own state in the rail instead of only appearing once the user has
+   * arrived there.
+   */
+  const readiness = detail.readiness;
+  const submissionState: FlowStepState =
+    detail.submissions.length > 0
+      ? "done"
+      : readiness.status === "complete"
+        ? "current"
+        : readiness.status === "incomplete"
+          ? "attention"
+          : "todo";
+
+  const steps: FlowStep[] = [
+    {
+      id: "claim",
+      label: "Réclamation",
+      hint: INTAKE_STATUS_LABEL[detail.intake.status],
+      state: claimState,
+      icon: Scales,
+    },
+    {
+      id: "documents",
+      label: "Pièces",
+      hint: activeDocumentCount === 0 ? "Aucune pièce" : `${activeDocumentCount} pièce${activeDocumentCount > 1 ? "s" : ""}`,
+      state: activeDocumentCount > 0 ? "done" : "todo",
+      icon: Files,
+    },
+    {
+      id: "checks",
+      label: "Vérifications",
+      hint: verdict ? verdict.headline : "Analyse non lancée",
+      state: checksState,
+      icon: ListChecks,
+    },
+    {
+      id: "submission",
+      label: "Transmission",
+      hint:
+        detail.submissions.length > 0
+          ? `${detail.submissions.length} envoi${detail.submissions.length > 1 ? "s" : ""}`
+          : readiness.status === "complete"
+            ? "Prêt à transmettre"
+            : READINESS_LABEL[readiness.status],
+      state: submissionState,
+      icon: PaperPlaneTilt,
+    },
+  ];
+
+  const requestedStep = searchParams.get("tab");
+  const activeStep: StepId = isStepId(requestedStep) ? requestedStep : intakeReady ? "documents" : "claim";
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-text">
-            {detail.claim.claimant_name} <span className="text-text-subtle">c.</span> {detail.claim.counterparty_name}
+    <div className="mx-auto max-w-5xl px-6 py-8">
+      <Link
+        to="/cases"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-text-muted no-underline transition-colors hover:text-accent"
+      >
+        <ArrowLeft size={15} aria-hidden="true" />
+        Mes dossiers
+      </Link>
+
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl leading-tight font-semibold text-text" dir="auto">
+            {detail.claim.claimant_name} <span className="font-normal text-text-subtle">c.</span>{" "}
+            {detail.claim.counterparty_name}
           </h1>
-          <p className="mt-1 text-xs text-text-muted">
+          <p className="mt-1.5 text-xs text-text-muted">
             Révision <span className="tabular">{detail.revision}</span> · dossier{" "}
             <span className="tabular">{caseId}</span>
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <p className="tabular text-md font-semibold text-text">
-            {detail.claim.claimed_amount} {detail.claim.currency}
+
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <p className="tabular text-lg leading-none font-semibold tracking-tighter text-text">
+            {detail.claim.claimed_amount} <span className="text-sm font-medium text-text-muted">{detail.claim.currency}</span>
           </p>
-          <Badge tone={INTAKE_STATUS_TONE[detail.intake.status]}>{INTAKE_STATUS_LABEL[detail.intake.status]}</Badge>
+          <div className="flex items-center gap-2">
+            {/*
+             * The whole-case readiness verdict, not the intake gate: intake
+             * state stays visible as the Réclamation step's own state in the
+             * flow rail, so the header carries one status, not a stack.
+             */}
+            <Badge tone={READINESS_TONE[readiness.status]}>{READINESS_LABEL[readiness.status]}</Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<ClockCounterClockwise size={15} />}
+              onClick={() => setActivityOpen(true)}
+            >
+              Historique
+              {detail.activity.length > 0 && (
+                <span className="tabular text-xs text-text-subtle">({detail.activity.length})</span>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -210,91 +308,96 @@ export function CaseDetailPage() {
         </p>
       )}
 
-      {notReady && config && (
-        <div className="mt-6 rounded-md border border-border bg-surface p-6">
-          <h2 className="text-md font-medium text-text">
-            {detail.intake.status === "gate_unavailable"
-              ? "Vérification indisponible"
-              : "Plus de détails sont nécessaires"}
-          </h2>
-          <p className="mt-1 text-sm text-text-muted">
-            {detail.intake.status === "gate_unavailable"
-              ? "La vérification n'a pas pu s'exécuter. Réessayez, ou modifiez le dossier ci-dessous."
-              : "Complétez ou précisez les champs signalés ci-dessous, puis enregistrez pour poursuivre."}
-          </p>
-          {detail.intake.status === "gate_unavailable" && (
-            <div className="mt-3">
-              <Button variant="secondary" onClick={() => void handleRetryGate()}>
-                Réessayer la vérification
-              </Button>
-            </div>
-          )}
-          <div className="mt-6">
-            <IntakeForm
-              config={config}
-              initialClaim={detail.claim}
-              questions={detail.intake.questions}
-              submitLabel="Enregistrer"
-              onSubmit={handleSaveClaim}
-            />
-          </div>
-        </div>
-      )}
-
-      {/*
-       * Uploads stay available while intake needs information — frontend.md
-       * F4: "If intake requires more information, keep the draft and
-       * uploaded files." Only the analysis-dependent tabs stay placeholders.
-       */}
       <div className="mt-6">
         {config ? (
-          <Tabs
-            idPrefix="case-workspace"
-            activeId={searchParams.get("tab") ?? "documents"}
-            onActiveChange={(id) => setSearchParams((prev) => new URLSearchParams({ ...Object.fromEntries(prev), tab: id }))}
-            tabs={WORKSPACE_TABS.map((tab) => ({
-              ...tab,
-              panel:
-                tab.id === "documents" && caseId ? (
-                  <DocumentWorkspace
-                    caseId={caseId}
-                    revision={detail.revision}
-                    documents={detail.documents}
-                    config={config}
-                    onUpdate={updateDocuments}
-                    onReload={load}
-                    selectedDocumentId={searchParams.get("doc")}
-                    selectedPage={Number(searchParams.get("page") ?? "1") || 1}
-                    onSelectDocument={selectDocument}
-                    onSelectPage={selectPage}
-                  />
-                ) : tab.id === "checks" && caseId ? (
-                  <FindingsPanel
-                    detail={detail}
-                    onUpdate={handleFindingResponse}
-                    onReload={load}
-                    onOpenDocumentPage={openDocumentPage}
-                  />
-                ) : tab.id === "activity" ? (
-                  <ActivityTimeline activity={detail.activity} />
-                ) : tab.id === "submission" && caseId ? (
-                  <SubmissionPanel
-                    caseId={caseId}
-                    detail={detail}
-                    onReload={load}
-                    onNavigateToChecks={() =>
-                      setSearchParams((prev) => new URLSearchParams({ ...Object.fromEntries(prev), tab: "checks" }))
-                    }
-                  />
-                ) : (
-                  <p className="text-sm text-text-muted">Cette section sera construite dans une prochaine étape.</p>
-                ),
-            }))}
-          />
+          <CaseFlow steps={steps} activeId={activeStep} onSelect={(id) => goToStep(id as StepId)}>
+            {activeStep === "claim" && (
+              <div className="flex flex-col gap-5">
+                {!intakeReady && (
+                  <div className="rounded-md border border-warning/40 bg-warning-bg p-4">
+                    <h2 className="text-md font-semibold text-warning">
+                      {detail.intake.status === "gate_unavailable"
+                        ? "Vérification indisponible"
+                        : "Plus de détails sont nécessaires"}
+                    </h2>
+                    <p className="mt-1 max-w-[65ch] text-sm text-warning">
+                      {detail.intake.status === "gate_unavailable"
+                        ? "La vérification n'a pas pu s'exécuter. Réessayez, ou modifiez le dossier ci-dessous."
+                        : "Complétez ou précisez les champs signalés ci-dessous, puis enregistrez pour poursuivre."}
+                    </p>
+                    {detail.intake.status === "gate_unavailable" && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<ArrowClockwise size={14} />}
+                        className="mt-3"
+                        onClick={() => void handleRetryGate()}
+                      >
+                        Réessayer la vérification
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                <div className="rounded-md border border-border bg-surface p-5 shadow-raised">
+                  <h2 className="text-md font-semibold text-text">Détails de la réclamation</h2>
+                  <p className="mt-1 max-w-[65ch] text-sm text-text-muted">
+                    Ces informations servent de référence à chaque vérification. Elles restent modifiables tant que le
+                    dossier n'est pas transmis.
+                  </p>
+                  <div className="mt-5">
+                    <IntakeForm
+                      config={config}
+                      initialClaim={detail.claim}
+                      questions={detail.intake.questions}
+                      submitLabel="Enregistrer"
+                      onSubmit={handleSaveClaim}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeStep === "documents" && caseId && (
+              <DocumentWorkspace
+                caseId={caseId}
+                revision={detail.revision}
+                documents={detail.documents}
+                config={config}
+                onUpdate={updateDocuments}
+                onReload={load}
+                selectedDocumentId={searchParams.get("doc")}
+                selectedPage={Number(searchParams.get("page") ?? "1") || 1}
+                onSelectDocument={selectDocument}
+                onSelectPage={selectPage}
+              />
+            )}
+
+            {activeStep === "checks" && caseId && (
+              <FindingsPanel
+                detail={detail}
+                onUpdate={handleFindingResponse}
+                onReload={load}
+                onOpenDocumentPage={openDocumentPage}
+                onNavigateToSubmission={() => goToStep("submission")}
+              />
+            )}
+
+            {activeStep === "submission" && caseId && (
+              <SubmissionPanel
+                caseId={caseId}
+                detail={detail}
+                onReload={load}
+                onNavigateToChecks={() => goToStep("checks")}
+              />
+            )}
+          </CaseFlow>
         ) : (
-          <div className="h-32 animate-pulse rounded-md bg-surface-muted" />
+          <div className="skeleton h-64 rounded-md" />
         )}
       </div>
+
+      <ActivityDrawer open={activityOpen} onClose={() => setActivityOpen(false)} activity={detail.activity} />
     </div>
   );
 }

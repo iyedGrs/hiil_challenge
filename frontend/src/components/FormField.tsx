@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from "react";
+import { Question, WarningCircle } from "@phosphor-icons/react";
 
 interface FormFieldProps {
   label: string;
@@ -33,12 +34,14 @@ export function FormField({ label, error, hint, followUp, required, children }: 
         ...(error ? { "aria-invalid": true } : {}),
       })}
       {followUp && (
-        <p id={followUpId} className="rounded-sm bg-warning-bg px-2.5 py-1.5 text-sm text-warning">
+        <p id={followUpId} className="flex items-start gap-1.5 rounded-sm bg-warning-bg px-2.5 py-1.5 text-sm text-warning">
+          <Question size={15} weight="fill" aria-hidden="true" className="mt-0.5 shrink-0" />
           {followUp}
         </p>
       )}
       {error && (
-        <p id={errorId} role="alert" className="text-sm text-danger">
+        <p id={errorId} role="alert" className="flex items-start gap-1.5 text-sm text-danger">
+          <WarningCircle size={15} weight="fill" aria-hidden="true" className="mt-0.5 shrink-0" />
           {error}
         </p>
       )}

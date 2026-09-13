@@ -1,3 +1,13 @@
+import {
+  CheckCircle,
+  MinusCircle,
+  Paperclip,
+  PencilSimple,
+  Prohibit,
+  Question,
+  XCircle,
+  type Icon,
+} from "@phosphor-icons/react";
 import type { BadgeTone } from "../components/Badge";
 import type {
   AnalysisStatus,
@@ -12,7 +22,7 @@ import type {
 
 /** Automatic case readiness verdict (spec/progress.md change log). */
 export const READINESS_LABEL: Record<ReadinessStatusValue, string> = {
-  complete: "Dossier complet et cohérent – prêt à transmettre",
+  complete: "Dossier complet et cohérent, prêt à transmettre",
   incomplete: "Dossier incomplet",
   needs_analysis: "Analyse requise",
 };
@@ -30,8 +40,8 @@ export const READINESS_TONE: Record<ReadinessStatusValue, BadgeTone> = {
  * wording).
  */
 export const CHECK_RESULT_LABEL: Record<CheckResult, string> = {
-  satisfied: "Satisfait",
-  contradicted: "Contredit par les pièces",
+  satisfied: "Appuyé par les pièces",
+  contradicted: "Écart avec les pièces",
   unassessable: "Non évaluable",
   not_applicable: "Non applicable",
 };
@@ -43,9 +53,10 @@ export const CHECK_RESULT_TONE: Record<CheckResult, BadgeTone> = {
   not_applicable: "muted",
 };
 
+/** Reads as a clause after the result, e.g. "Écart avec les pièces · à traiter". */
 export const FINDING_STATUS_LABEL: Record<NonNullable<FindingStatus>, string> = {
-  open: "Ouvert",
-  resolved: "Résolu",
+  open: "à traiter",
+  resolved: "résolu",
 };
 
 export const FINDING_STATUS_TONE: Record<NonNullable<FindingStatus>, BadgeTone> = {
@@ -54,7 +65,7 @@ export const FINDING_STATUS_TONE: Record<NonNullable<FindingStatus>, BadgeTone> 
 };
 
 export const FINDING_DELTA_LABEL: Record<NonNullable<FindingDelta>, string> = {
-  new: "Nouveau",
+  new: "Apparu à cette analyse",
   resolved: "Résolu depuis la dernière analyse",
   still_open: "Toujours ouvert",
   reopened: "Rouvert",
@@ -101,4 +112,23 @@ export const ANALYSIS_STATUS_TONE: Record<AnalysisStatus, BadgeTone> = {
   ready: "success",
   partial: "warning",
   outdated: "danger",
+};
+
+/**
+ * One glyph per check result so a scan of the findings list separates outcomes
+ * before any text is read. Icons come from Phosphor (no hand-rolled SVG) and
+ * are always paired with the text label, never used alone as the only signal.
+ */
+export const CHECK_RESULT_ICON: Record<CheckResult, Icon> = {
+  satisfied: CheckCircle,
+  contradicted: XCircle,
+  unassessable: Question,
+  not_applicable: MinusCircle,
+};
+
+export const FINDING_ACTION_ICON: Record<FindingAction, Icon> = {
+  add_evidence: Paperclip,
+  correct_claim: PencilSimple,
+  explain_unavailable: Question,
+  disagree: Prohibit,
 };

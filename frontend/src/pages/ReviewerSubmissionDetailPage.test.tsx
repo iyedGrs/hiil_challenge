@@ -115,7 +115,7 @@ describe("ReviewerSubmissionDetailPage", () => {
     // Received/reviewed must not read as legal acceptance.
     expect(screen.getByText(/n'emporte aucune acceptation/)).toBeInTheDocument();
     // The frozen readiness verdict is shown, not decided by the reviewer.
-    expect(screen.getByText("Dossier complet et cohérent – prêt à transmettre")).toBeInTheDocument();
+    expect(screen.getByText("Dossier complet et cohérent, prêt à transmettre")).toBeInTheDocument();
   });
 
   it("is a read-only inbox: no action to mark received/reviewed or request clarification", async () => {

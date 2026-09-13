@@ -3,7 +3,8 @@ import { caseApi } from "../api";
 import { ApiError } from "../api/ApiError";
 import type { CheckFinding, DocumentRecord, FindingAction, FindingResponse } from "../api/types";
 import { Button } from "./Button";
-import { FINDING_ACTION_LABEL } from "../lib/findingLabels";
+import { useToast } from "./Toast";
+import { FINDING_ACTION_ICON, FINDING_ACTION_LABEL } from "../lib/findingLabels";
 
 interface FindingResponseFormProps {
   finding: CheckFinding;
@@ -32,6 +33,7 @@ export function FindingResponseForm({
   onRevisionConflict,
 }: FindingResponseFormProps) {
   const formId = useId();
+  const { notify } = useToast();
   const [openAction, setOpenAction] = useState<FindingAction | null>(null);
   const [explanation, setExplanation] = useState("");
   const [documentIds, setDocumentIds] = useState<string[]>([]);
@@ -82,6 +84,7 @@ export function FindingResponseForm({
       );
       onSubmitted(result.revision, result.response);
       setOpenAction(null);
+      notify("success", "Réponse enregistrée. Relancez l'analyse pour réévaluer ce constat.");
     } catch (err) {
       if (err instanceof ApiError && err.code === "REVISION_CONFLICT") {
         onRevisionConflict();
@@ -98,18 +101,24 @@ export function FindingResponseForm({
   }
 
   return (
-    <div className="mt-3 border-t border-border pt-3">
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Répondre à ce constat">
-        {finding.actions.map((action) => (
-          <Button
-            key={action}
-            variant={openAction === action ? "primary" : "secondary"}
-            onClick={() => (openAction === action ? cancel() : startAction(action))}
-            aria-pressed={openAction === action}
-          >
-            {FINDING_ACTION_LABEL[action]}
-          </Button>
-        ))}
+    <div className="border-t border-border bg-surface-muted px-4 py-3 ps-5">
+      <p className="text-xs font-medium text-text-muted">Répondre à ce constat</p>
+      <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Répondre à ce constat">
+        {finding.actions.map((action) => {
+          const ActionIcon = FINDING_ACTION_ICON[action];
+          return (
+            <Button
+              key={action}
+              size="sm"
+              variant={openAction === action ? "primary" : "secondary"}
+              icon={<ActionIcon size={14} />}
+              onClick={() => (openAction === action ? cancel() : startAction(action))}
+              aria-pressed={openAction === action}
+            >
+              {FINDING_ACTION_LABEL[action]}
+            </Button>
+          );
+        })}
       </div>
 
       <p className="mt-2 text-xs text-text-subtle">
@@ -117,7 +126,7 @@ export function FindingResponseForm({
       </p>
 
       {openAction && (
-        <div className="mt-3 flex flex-col gap-3 rounded-md border border-border bg-surface-muted p-3">
+        <div className="mt-3 flex flex-col gap-3 rounded-md border border-border bg-surface p-3 animate-enter-up">
           {openAction === "add_evidence" && (
             <fieldset>
               <legend className="text-sm font-medium text-text">Documents à joindre</legend>
@@ -158,7 +167,7 @@ export function FindingResponseForm({
               dir="auto"
               aria-describedby={error ? `${formId}-error` : undefined}
               aria-invalid={error ? true : undefined}
-              className="mt-1 w-full rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+              className="mt-1 w-full rounded-sm border border-border-control bg-surface px-3 py-2 text-base text-text transition-colors hover:border-text-muted"
             />
           </div>
 
@@ -169,7 +178,7 @@ export function FindingResponseForm({
           )}
 
           <div className="flex gap-2">
-            <Button onClick={() => void handleSubmit()} disabled={submitting}>
+            <Button onClick={() => void handleSubmit()} pending={submitting}>
               {submitting ? "Envoi…" : "Envoyer la réponse"}
             </Button>
             <Button variant="secondary" onClick={cancel} disabled={submitting}>
