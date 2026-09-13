@@ -44,12 +44,15 @@ export const FIXTURE_CONFIG: AppConfig = {
     max_total_pages: 30,
     max_file_bytes: 10 * 1024 * 1024,
     max_case_bytes: 50 * 1024 * 1024,
+    supported_mime_types: ["application/pdf", "image/jpeg", "image/png"],
   },
   legal_coverage: { unpaid_goods_invoice: "unvalidated" },
   execution_mode: "fixture",
 };
 
-export const FIXTURE_RECIPIENTS: Recipient[] = [{ recipient_id: "recipient_reviewer_demo", name: "Reviewer Démo" }];
+export const FIXTURE_RECIPIENTS: Recipient[] = [
+  { recipient_id: "recipient_reviewer_demo", name: "Reviewer Démo", remit: "Reviews submitted case packages." },
+];
 
 // PROVISIONAL (B9 gap): B9 does not enumerate how a recipient maps to a
 // signed-in reviewer account; assumed a fixed recipient->reviewer assignment
@@ -216,7 +219,7 @@ export const DEMO_CASE_CHECK: CheckFinding = {
   reason_code: "EVIDENCE_NOT_FOUND",
   finding_status: "open",
   delta: "new",
-  basis: "checklist",
+  basis: "evidence_guidance",
   message: "Aucune preuve de réception trouvée dans les pièces examinées.",
   evidence_refs: [],
   reviewed_document_ids: ["DOC_001", "DOC_002"],
@@ -255,7 +258,7 @@ export const DEMO_CASE_CHECK_UNREADABLE: CheckFinding = {
   reason_code: "SOURCE_UNREADABLE",
   finding_status: "open",
   delta: "new",
-  basis: "deterministic",
+  basis: "reconciliation",
   message: "Ce document n'a pas pu être analysé : le fichier est illisible ou protégé.",
   evidence_refs: [],
   reviewed_document_ids: [],
@@ -273,7 +276,7 @@ export const DEMO_CASE_CHECK_NOT_APPLICABLE: CheckFinding = {
   reason_code: "NOT_APPLICABLE",
   finding_status: null,
   delta: "not_applicable",
-  basis: "claim",
+  basis: "evidence_guidance",
   message: "Ce contrôle ne s'applique pas : le paiement échelonné n'a pas été demandé pour ce dossier.",
   evidence_refs: [],
   reviewed_document_ids: [],
@@ -291,7 +294,7 @@ export const DEMO_CASE_CHECK_AMOUNT_DISCREPANCY: CheckFinding = {
   reason_code: "CONFLICT",
   finding_status: "open",
   delta: "new",
-  basis: "deterministic",
+  basis: "reconciliation",
   message: "Le montant réclamé diffère du solde documenté par les pièces fournies.",
   evidence_refs: [
     { fact_id: "fact_receipt_partial", document_id: "DOC_003", page: 1, source_text: "Reçu partiel — [zone illisible] ... solde restant [zone illisible]." },

@@ -13,9 +13,8 @@ import {
 
 const BASIS_LABEL: Record<CheckFinding["basis"], string> = {
   checklist: "Checklist",
-  contract: "Contrat",
-  claim: "Réclamation",
-  deterministic: "Vérification déterministe (fichier/montant)",
+  evidence_guidance: "Pièces / contrat / réclamation",
+  reconciliation: "Vérification déterministe (fichier/montant)",
 };
 
 interface FindingCardProps {
