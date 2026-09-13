@@ -31,9 +31,10 @@ import {
   FIXTURE_CONFIG,
   FIXTURE_RECIPIENTS,
   FIXTURE_USERS,
+  RECIPIENT_REVIEWER_ASSIGNMENTS,
   buildBaselineChecks,
 } from "./seed";
-import { createFixtureStore, type FixtureStore, type StoredCase } from "./store";
+import { createFixtureStore, type FixtureStore, type StoredCase, type StoredSubmission } from "./store";
 
 /** Running phases in exact order per spec/backend.md B9. */
 const JOB_PHASES: JobPhase[] = ["reading", "extracting", "validating_facts", "checking", "validating_checks", "publishing"];
@@ -191,6 +192,15 @@ export class FixtureCaseApi implements CaseApi {
     if (record.revision !== expectedRevision) throw revisionConflict();
   }
 
+  /** Only the reviewer assigned to a submission's recipient may see or act on it (frontend.md "Reviewer back office"). */
+  private requireAssignedSubmission(submissionId: string): StoredSubmission {
+    const user = this.requireAuth();
+    if (user.role !== "reviewer") throw notFound();
+    const stored = this.store.submissions.get(submissionId);
+    if (!stored || RECIPIENT_REVIEWER_ASSIGNMENTS[stored.recipient_id] !== user.id) throw notFound();
+    return stored;
+  }
+
   async getConfig(): Promise<AppConfig> {
     return structuredClone(FIXTURE_CONFIG);
   }
@@ -339,11 +349,9 @@ export class FixtureCaseApi implements CaseApi {
 
   async getDocumentPage(documentId: string, page: number): Promise<DocumentPage> {
     const user = this.requireAuth();
-    for (const record of this.store.cases.values()) {
-      if (record.owner_id !== user.id) continue;
-      const doc = record.documents.find((d) => d.document_id === documentId);
-      if (!doc) continue;
-      if (doc.pages !== null && (page < 1 || page > doc.pages)) throw notFound();
+
+    function respond(pages: number | null): DocumentPage {
+      if (pages !== null && (page < 1 || page > pages)) throw notFound();
       const seeded = DEMO_DOCUMENT_PAGES[documentId]?.find((p) => p.page === page);
       if (seeded) return structuredClone(seeded);
       return {
@@ -354,6 +362,24 @@ export class FixtureCaseApi implements CaseApi {
         method: null,
         quality: null,
       };
+    }
+
+    if (user.role === "reviewer") {
+      // FE-09: a reviewer reads the pages frozen in an assigned submission's
+      // snapshot, never the case's current working documents.
+      for (const stored of this.store.submissions.values()) {
+        if (RECIPIENT_REVIEWER_ASSIGNMENTS[stored.recipient_id] !== user.id) continue;
+        const doc = stored.snapshot.documents.find((d) => d.document_id === documentId);
+        if (doc) return respond(doc.pages);
+      }
+      throw notFound();
+    }
+
+    for (const record of this.store.cases.values()) {
+      if (record.owner_id !== user.id) continue;
+      const doc = record.documents.find((d) => d.document_id === documentId);
+      if (!doc) continue;
+      return respond(doc.pages);
     }
     throw notFound();
   }
@@ -621,21 +647,21 @@ export class FixtureCaseApi implements CaseApi {
   async listReviewerSubmissions(): Promise<ListResponse<ReviewerSubmissionSummary>> {
     const user = this.requireAuth();
     if (user.role !== "reviewer") throw notFound();
-    const items: ReviewerSubmissionSummary[] = [...this.store.submissions.values()].map((s) => ({
-      submission_id: s.submission_id,
-      case_id: s.case_id,
-      claimant_name: s.snapshot.claim.claimant_name,
-      status: s.status,
-      submitted_at: s.submitted_at,
-    }));
+    const items: ReviewerSubmissionSummary[] = [...this.store.submissions.values()]
+      .filter((s) => RECIPIENT_REVIEWER_ASSIGNMENTS[s.recipient_id] === user.id)
+      .map((s) => ({
+        submission_id: s.submission_id,
+        case_id: s.case_id,
+        claimant_name: s.snapshot.claim.claimant_name,
+        revision: s.revision,
+        status: s.status,
+        submitted_at: s.submitted_at,
+      }));
     return { items, next_cursor: null };
   }
 
   async getReviewerSubmission(submissionId: string): Promise<ReviewerSubmissionDetail> {
-    const user = this.requireAuth();
-    if (user.role !== "reviewer") throw notFound();
-    const stored = this.store.submissions.get(submissionId);
-    if (!stored) throw notFound();
+    const stored = this.requireAssignedSubmission(submissionId);
     return {
       submission_id: stored.submission_id,
       case_id: stored.case_id,
@@ -653,10 +679,7 @@ export class FixtureCaseApi implements CaseApi {
     eventType: ReviewEventType,
     message: string | null,
   ): Promise<ReviewEvent> {
-    const user = this.requireAuth();
-    if (user.role !== "reviewer") throw notFound();
-    const stored = this.store.submissions.get(submissionId);
-    if (!stored) throw notFound();
+    const stored = this.requireAssignedSubmission(submissionId);
 
     const event: ReviewEvent = {
       event_id: this.store.nextId("EVT"),

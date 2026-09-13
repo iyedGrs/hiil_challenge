@@ -24,9 +24,11 @@ interface FindingCardProps {
   /** Every document ever attached to the case (active or not) — used only to resolve filenames for display. */
   documents: DocumentRecord[];
   existingResponse: FindingResponse | null;
-  onRespond: (revision: number, response: FindingResponse) => void;
-  onRevisionConflict: () => void;
+  onRespond?: (revision: number, response: FindingResponse) => void;
+  onRevisionConflict?: () => void;
   onOpenDocumentPage: (documentId: string, page: number) => void;
+  /** Reviewer back office (UI-08): hides the response form — a reviewer never edits evidence or rewrites findings. */
+  readOnly?: boolean;
 }
 
 function documentLabel(documents: DocumentRecord[], documentId: string): string {
@@ -46,6 +48,7 @@ export function FindingCard({
   onRespond,
   onRevisionConflict,
   onOpenDocumentPage,
+  readOnly,
 }: FindingCardProps) {
   const activeDocuments = documents.filter((d) => d.active);
   const unreviewableDocuments = documents.filter(
@@ -138,13 +141,15 @@ export function FindingCard({
         </div>
       )}
 
-      <FindingResponseForm
-        finding={finding}
-        revision={revision}
-        activeDocuments={activeDocuments}
-        onSubmitted={onRespond}
-        onRevisionConflict={onRevisionConflict}
-      />
+      {!readOnly && onRespond && onRevisionConflict && (
+        <FindingResponseForm
+          finding={finding}
+          revision={revision}
+          activeDocuments={activeDocuments}
+          onSubmitted={onRespond}
+          onRevisionConflict={onRevisionConflict}
+        />
+      )}
     </li>
   );
 }
