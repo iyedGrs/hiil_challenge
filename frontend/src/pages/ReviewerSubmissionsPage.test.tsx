@@ -18,6 +18,7 @@ const SUBMISSION: ReviewerSubmissionSummary = {
   revision: 3,
   status: "submitted",
   submitted_at: "2026-06-12T09:00:00Z",
+  readiness: { status: "complete", reasons: [] },
 };
 
 function renderPage() {

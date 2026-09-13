@@ -17,6 +17,7 @@ import type {
   Job,
   JobPhase,
   ListResponse,
+  Readiness,
   Recipient,
   ReviewEvent,
   ReviewEventType,
@@ -148,6 +149,35 @@ function toCaseSummary(c: StoredCase): CaseSummary {
   };
 }
 
+/**
+ * Mirrors the backend's automatic readiness verdict (`app.pipeline.readiness`,
+ * spec/progress.md change log): decided by the analysis plus deterministic
+ * checks, never by a human reviewer. Fixture-mode runs always report
+ * `execution_mode: "fixture"`, so they can never come back `complete` here
+ * either — the same rule as the real backend.
+ */
+function computeReadiness(caseRevision: number, analysis: Analysis | null): Readiness {
+  if (!analysis || analysis.revision !== caseRevision) {
+    return { status: "needs_analysis", reasons: ["Aucune analyse à jour n'a été publiée pour ce dossier."] };
+  }
+  const reasons: string[] = [];
+  if (analysis.execution_mode !== "live") {
+    reasons.push("Analyse simulée : aucun verdict.");
+  }
+  if (analysis.status === "partial") {
+    reasons.push("L'analyse est incomplète : une partie des pièces n'a pas pu être examinée.");
+  }
+  if (analysis.coverage.unreadable_pages > 0) {
+    reasons.push(`${analysis.coverage.unreadable_pages} page(s) des pièces déposées n'ont pas pu être lues.`);
+  }
+  for (const check of analysis.checks) {
+    if (check.result !== "satisfied" && check.result !== "not_applicable") {
+      reasons.push(`${check.subject_label} : ${check.message}`);
+    }
+  }
+  return reasons.length > 0 ? { status: "incomplete", reasons } : { status: "complete", reasons: [] };
+}
+
 function toCaseDetail(c: StoredCase): CaseDetail {
   const latestJob = c.jobs.at(-1) ?? null;
   const latestAnalysis = c.analyses.at(-1) ?? null;
@@ -159,6 +189,7 @@ function toCaseDetail(c: StoredCase): CaseDetail {
     documents: structuredClone(c.documents),
     latest_job: latestJob ? structuredClone(latestJob) : null,
     latest_analysis: latestAnalysis ? structuredClone(latestAnalysis) : null,
+    readiness: computeReadiness(c.revision, latestAnalysis),
     submissions: structuredClone(c.submissions),
     activity: structuredClone(c.activity),
     responses: Object.values(c.responses).map((r) => structuredClone(r)),
@@ -607,6 +638,21 @@ export class FixtureCaseApi implements CaseApi {
     const recipient = FIXTURE_RECIPIENTS.find((r) => r.recipient_id === recipientId);
     if (!recipient) throw notFound();
 
+    // Submission is only reachable once the automatic verdict is "complete"
+    // (spec/progress.md change log: readiness verdict replaces reviewer
+    // approval) — mirrors the backend's `CASE_NOT_COMPLETE` gate.
+    const readiness = computeReadiness(record.revision, analysis);
+    if (readiness.status !== "complete") {
+      throw new ApiError(409, {
+        error: {
+          code: "CASE_NOT_COMPLETE",
+          message: "Ce dossier n'est pas encore complet et ne peut pas être transmis.",
+          field_errors: readiness.reasons.map((reason) => ({ field: "readiness", message: reason })),
+          retryable: false,
+        },
+      });
+    }
+
     const submission_id = this.store.nextId("SUB");
     const submitted_at = new Date().toISOString();
     const stored = {
@@ -622,6 +668,7 @@ export class FixtureCaseApi implements CaseApi {
         documents: structuredClone(record.documents),
         analysis: structuredClone(analysis),
         responses: Object.values(record.responses).map((r) => structuredClone(r)),
+        readiness,
       },
       events: [],
     };
@@ -656,6 +703,7 @@ export class FixtureCaseApi implements CaseApi {
         revision: s.revision,
         status: s.status,
         submitted_at: s.submitted_at,
+        readiness: structuredClone(s.snapshot.readiness),
       }));
     return { items, next_cursor: null };
   }
@@ -669,6 +717,7 @@ export class FixtureCaseApi implements CaseApi {
       claim: structuredClone(stored.snapshot.claim),
       documents: structuredClone(stored.snapshot.documents),
       analysis: structuredClone(stored.snapshot.analysis),
+      readiness: structuredClone(stored.snapshot.readiness),
       responses: structuredClone(stored.snapshot.responses),
       events: structuredClone(stored.events),
     };

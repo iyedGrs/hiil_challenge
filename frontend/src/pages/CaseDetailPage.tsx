@@ -12,6 +12,7 @@ import { SubmissionPanel } from "../components/SubmissionPanel";
 import { Tabs } from "../components/Tabs";
 import { useSession } from "../session/SessionContext";
 import { INTAKE_STATUS_LABEL, INTAKE_STATUS_TONE } from "../lib/intakeStatus";
+import { READINESS_LABEL, READINESS_TONE } from "../lib/findingLabels";
 
 type LoadState = { status: "loading" } | { status: "error"; message: string } | { status: "loaded"; detail: CaseDetail };
 
@@ -197,6 +198,10 @@ export function CaseDetailPage() {
           </p>
           <Badge tone={INTAKE_STATUS_TONE[detail.intake.status]}>{INTAKE_STATUS_LABEL[detail.intake.status]}</Badge>
         </div>
+      </div>
+
+      <div className="mt-4">
+        <Badge tone={READINESS_TONE[detail.readiness.status]}>{READINESS_LABEL[detail.readiness.status]}</Badge>
       </div>
 
       {banner && (

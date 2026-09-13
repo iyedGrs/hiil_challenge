@@ -15,6 +15,8 @@ import {
   FINDING_DELTA_LABEL,
   LEGAL_COVERAGE_LABEL,
   LEGAL_COVERAGE_TONE,
+  READINESS_LABEL,
+  READINESS_TONE,
 } from "../lib/findingLabels";
 
 const RESULT_FILTER_OPTIONS: Array<CheckResult | "all"> = ["all", "satisfied", "contradicted", "unassessable", "not_applicable"];
@@ -121,6 +123,19 @@ export function FindingsPanel({ detail, onUpdate, onReload, onOpenDocumentPage }
     return counts.size > 0 ? counts : null;
   }, [analysis]);
 
+  const readinessBanner = (
+    <div className="rounded-md border border-border bg-surface p-4">
+      <Badge tone={READINESS_TONE[detail.readiness.status]}>{READINESS_LABEL[detail.readiness.status]}</Badge>
+      {detail.readiness.reasons.length > 0 && (
+        <ul className="mt-2 list-disc pl-4 text-sm text-text-muted">
+          {detail.readiness.reasons.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
   const runControls = (
     <>
       {isJobActive && polling.job && (
@@ -145,6 +160,7 @@ export function FindingsPanel({ detail, onUpdate, onReload, onOpenDocumentPage }
   if (!analysis) {
     return (
       <div className="flex flex-col gap-4">
+        {readinessBanner}
         {runControls}
         {!isJobActive && !failedJob && (
           <div className="rounded-md border border-dashed border-border p-6 text-sm text-text-muted">
@@ -173,6 +189,7 @@ export function FindingsPanel({ detail, onUpdate, onReload, onOpenDocumentPage }
 
   return (
     <div className="flex flex-col gap-6">
+      {readinessBanner}
       {runControls}
       {isOutdated && (
         <p role="alert" className="rounded-sm bg-danger-bg px-3 py-2 text-sm text-danger">

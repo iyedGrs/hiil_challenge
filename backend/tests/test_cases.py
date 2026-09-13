@@ -293,6 +293,7 @@ def test_case_detail_shape_matches_the_contract(client: TestClient, seeded: None
         "documents",
         "latest_job",
         "latest_analysis",
+        "readiness",
         "submissions",
         "activity",
         "responses",

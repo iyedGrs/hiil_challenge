@@ -193,6 +193,17 @@ export interface Job {
 
 export type AnalysisStatus = "ready" | "partial" | "outdated";
 
+/**
+ * Automatic case readiness verdict (spec/progress.md change log): decided by
+ * the AI analysis plus deterministic backend code, never by a human reviewer.
+ */
+export type ReadinessStatusValue = "complete" | "incomplete" | "needs_analysis";
+
+export interface Readiness {
+  status: ReadinessStatusValue;
+  reasons: string[];
+}
+
 export type CheckResult = "satisfied" | "contradicted" | "unassessable" | "not_applicable";
 
 export type ReasonCode =
@@ -322,6 +333,7 @@ export interface CaseDetail {
   documents: DocumentRecord[];
   latest_job: Job | null;
   latest_analysis: Analysis | null;
+  readiness: Readiness;
   submissions: SubmissionSummary[];
   activity: ActivityEvent[];
   // PROVISIONAL (B9 gap): frontend.md F4 requires showing "the previous
@@ -381,6 +393,7 @@ export interface ReviewerSubmissionSummary {
   revision?: number;
   status: string;
   submitted_at: string;
+  readiness: Readiness;
 }
 
 export type ReviewEventType = "received" | "clarification_requested" | "reviewed";
@@ -404,6 +417,7 @@ export interface ReviewerSubmissionDetail {
   claim: Claim;
   documents: DocumentRecord[];
   analysis: Analysis;
+  readiness: Readiness;
   responses: FindingResponse[];
   events: ReviewEvent[];
 }
@@ -430,6 +444,7 @@ export type ApiErrorCode =
   | "ANALYSIS_ALREADY_RUNNING"
   | "BUDGET_EXHAUSTED"
   | "PROVIDER_UNAVAILABLE"
+  | "CASE_NOT_COMPLETE"
   | (string & {});
 
 export interface ApiErrorBody {

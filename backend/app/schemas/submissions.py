@@ -16,6 +16,7 @@ from pydantic import Field
 
 from app.domain.enums import ExportState, ReviewEventType, SubmissionState
 from app.schemas.common import ResponseModel, StrictModel
+from app.schemas.readiness import ReadinessOut
 
 #: Bound on a reviewer clarification message.
 REVIEW_MESSAGE_MAX_LENGTH = 4_000
@@ -103,6 +104,7 @@ class ReviewerSubmissionSummaryOut(ResponseModel):
     revision: int
     status: SubmissionState
     submitted_at: datetime
+    readiness: ReadinessOut
 
 
 class ReviewEventIn(StrictModel):

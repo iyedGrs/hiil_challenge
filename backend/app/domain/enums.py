@@ -260,6 +260,18 @@ class ExportState(StrEnum):
     failed = "failed"
 
 
+class ReadinessStatus(StrEnum):
+    """Automatic case readiness verdict (spec/progress.md change log).
+
+    Decided by :mod:`app.pipeline.readiness` from the AI analysis and
+    deterministic code -- never by a human reviewer.
+    """
+
+    complete = "complete"
+    incomplete = "incomplete"
+    needs_analysis = "needs_analysis"
+
+
 class ClaimOrigin(StrEnum):
     """Provenance of typed claim data (spec/backend.md B3).
 
@@ -290,6 +302,7 @@ __all__ = [
     "PageMethod",
     "PageQuality",
     "PageState",
+    "ReadinessStatus",
     "ReasonCode",
     "RequestedOutcome",
     "ResponseAction",

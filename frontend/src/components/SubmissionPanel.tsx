@@ -28,6 +28,7 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
   const analysis = detail.latest_analysis;
   const job = detail.latest_job;
 
+  const readiness = detail.readiness;
   const jobFailed = job?.status === "failed";
   const isOutdated = analysis !== null && (analysis.status === "outdated" || analysis.revision < detail.revision);
   const isPartial = analysis !== null && analysis.status === "partial" && !isOutdated;
@@ -43,10 +44,17 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
         ? `Cette analyse porte sur une révision antérieure du dossier (analyse ${analysis!.revision} / dossier ${detail.revision}).`
         : null;
 
+  // Export remains available for an incomplete case (it is a preparation
+  // package, not the handoff): it keeps its own acknowledgement checkboxes.
   const [ackPartial, setAckPartial] = useState(false);
   const [ackUnresolved, setAckUnresolved] = useState(false);
   const acknowledgeUnresolved = ackPartial || ackUnresolved;
-  const readyToProceed = !blocked && (!isPartial || ackPartial) && (unresolvedFindings.length === 0 || ackUnresolved);
+  const readyToExport = !blocked && (!isPartial || ackPartial) && (unresolvedFindings.length === 0 || ackUnresolved);
+
+  // Submission is gated by the automatic readiness verdict, plus the same
+  // "no usable analysis" guard export uses: no reviewer acknowledgement step
+  // (spec/progress.md change log).
+  const readyToSubmit = !blocked && readiness.status === "complete";
 
   // ---- Export -------------------------------------------------------------
   const [exportJobId, setExportJobId] = useState<string | null>(null);
@@ -127,7 +135,9 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
         detail.revision,
         analysis.analysis_id,
         recipientId,
-        acknowledgeUnresolved,
+        // No acknowledgement gate on submission: the readiness verdict
+        // decides eligibility. Kept as a request field for compatibility.
+        false,
         idempotencyKey,
       );
       submissionIdempotencyKeyRef.current = null;
@@ -257,8 +267,8 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
             className="mt-0.5"
           />
           <span>
-            Des constats restent non résolus et seront transmis tels quels. Je reconnais qu'ils sont conservés dans le
-            dossier.
+            Des constats restent non résolus et seront inclus dans le dossier téléchargé. Je reconnais ces limites et
+            souhaite générer le dossier.
           </span>
         </label>
       )}
@@ -296,7 +306,7 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
         )}
         {!exportJobId && (
           <div className="mt-3">
-            <Button variant="secondary" onClick={() => void handleExport()} disabled={!readyToProceed || exporting}>
+            <Button variant="secondary" onClick={() => void handleExport()} disabled={!readyToExport || exporting}>
               Générer le dossier
             </Button>
           </div>
@@ -306,6 +316,26 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
       {/* 4. Submission */}
       <div className="rounded-md border border-border bg-surface p-4">
         <h2 className="text-md font-medium text-text">Transmission pour examen</h2>
+
+        {!submissionResult && readiness.status !== "complete" && (
+          <div
+            role="status"
+            className={
+              readiness.status === "needs_analysis"
+                ? "mt-3 rounded-sm border border-border bg-surface-muted p-3 text-sm text-text-muted"
+                : "mt-3 rounded-sm border border-warning bg-warning-bg p-3 text-sm text-warning"
+            }
+          >
+            <p className="font-medium">{readiness.status === "needs_analysis" ? "Analyse requise" : "Dossier incomplet"}</p>
+            {readiness.reasons.length > 0 && (
+              <ul className="mt-1 list-disc pl-4">
+                {readiness.reasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {submissionResult ? (
           <div className="mt-3 rounded-sm bg-success-bg p-3 text-sm text-success">
@@ -325,11 +355,12 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
               <select
                 id={recipientFieldId}
                 value={recipientId}
+                disabled={!readyToSubmit}
                 onChange={(e) => {
                   setRecipientId(e.target.value);
                   setConfirmed(false);
                 }}
-                className="ml-2 rounded-sm border border-border-strong bg-surface px-2 py-1 text-sm text-text"
+                className="ml-2 rounded-sm border border-border-strong bg-surface px-2 py-1 text-sm text-text disabled:opacity-50"
               >
                 <option value="">Sélectionner…</option>
                 {recipients.map((recipient) => (
@@ -340,7 +371,7 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
               </select>
             </div>
 
-            {recipientId && (
+            {readyToSubmit && recipientId && (
               <label className="flex items-start gap-2 text-sm text-text">
                 <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
                 <span>
@@ -359,7 +390,7 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
             <div>
               <Button
                 onClick={() => void handleSubmit()}
-                disabled={!readyToProceed || !recipientId || !confirmed || submitting}
+                disabled={!readyToSubmit || !recipientId || !confirmed || submitting}
               >
                 Transmettre
               </Button>

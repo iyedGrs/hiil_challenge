@@ -32,6 +32,7 @@ from app.api.access import (
 from app.api.deps import CsrfDep, DbDep, PreparerDep
 from app.api.views import (
     analysis_out,
+    case_readiness_out,
     claim_out,
     documents_out,
     finding_response_out,
@@ -482,6 +483,7 @@ def get_case(case_id: str, user: PreparerDep, db: DbDep) -> CaseDetailOut:
         latest_analysis=(
             analysis_out(db, latest_analysis) if latest_analysis is not None else None
         ),
+        readiness=case_readiness_out(db, case_revision=case.revision, analysis=latest_analysis),
         submissions=submissions,
         activity=_activity(db, case),
         responses=responses,
