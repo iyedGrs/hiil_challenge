@@ -18,15 +18,35 @@ Documents: [frontend](frontend.md), [backend and canonical contract](backend.md)
 - [x] Canonical API contract and mock payload examples documented.
 - [x] Local-development environment and future commands documented.
 - [x] Shared progress and handoff plan created.
-- [ ] Application implementation authorized/started.
-- [ ] Frontend implemented.
-- [ ] Backend/worker implemented.
-- [ ] Live AI access tested.
-- [ ] Legal pack reviewed by a Tunisian practitioner.
-- [ ] Docker startup executed successfully.
-- [ ] Integrated demo validated.
+- [x] Application implementation authorized/started.
+- [x] Frontend implemented (UI-02 … UI-08 merged).
+- [x] Backend/worker implemented (all 26 B9 routes; both job handlers registered).
+- [ ] Live AI access tested. **Not done.** `AI_MODE=fixture` only; no provider credential has been configured and no provider call has ever been made. D08 is still open.
+- [ ] Legal pack reviewed by a Tunisian practitioner. **Not done and not planned for the hackathon.** `legal_coverage` stays `unvalidated` everywhere.
+- [x] Docker startup executed successfully (`build` → `alembic upgrade head` → `seed_demo` → `up api worker`; `/health/ready` reports `schema_version=0001_initial`, storage ok).
+- [x] Integrated demo validated in fixture mode, end to end over HTTP against the containerised API and worker.
+- [ ] Integrated demo validated in the **browser**. Backend verification was done with an HTTP client; UI still owns the browser pass (UI-09).
 
-Only documentation exists from this task. Unchecked items are not claims of completed work. Future commands in local-dev.md have not been executed against an application.
+Unchecked items are not claims of completed work. What "integrated demo validated" means precisely is recorded in P6.
+
+### Running the integrated stack
+
+```bash
+docker compose build
+docker compose up -d --wait db
+docker compose run --rm api alembic upgrade head
+docker compose run --rm api python -m app.seed_demo
+docker compose up -d api worker
+curl http://localhost:8000/api/health/ready
+```
+
+Then run Vite on the host with `VITE_DATA_MODE=http` (now the default in `.env.example`); the proxy already targets `127.0.0.1:8000` when `API_PROXY_TARGET` is unset. Seeded accounts: `preparer1@demo.local`, `preparer2@demo.local`, `reviewer@demo.local`, all with password `demo-pass-1234`.
+
+Two environment notes:
+
+- `compose.yaml` publishes PostgreSQL on `127.0.0.1:55432` so the backend test suite and a host-run uvicorn can reach the same database the containers use. Remove that mapping for anything deployed.
+- Backend tests need a database: `cd backend` then `TEST_DATABASE_URL=postgresql+psycopg://dispute_demo:<password>@127.0.0.1:55432/dispute_demo_test python -m pytest`. Create that database once with `docker compose exec db psql -U dispute_demo -d dispute_demo -c "CREATE DATABASE dispute_demo_test"`.
+- Tesseract is not installed on the host, so host-run OCR degrades a scan to `unreadable`. The worker image has it. Use text PDFs when testing outside Docker.
 
 ## P2. Decisions to record
 
@@ -37,10 +57,10 @@ Only documentation exists from this task. Unchecked items are not claims of comp
 | D03 | Fixed checklist chooses law; model judges supplied checks | Agreed in latest constraints | API |
 | D04 | Money calculated only in Decimal code; no conversion | Agreed in latest constraints | API |
 | D05 | Verify all source facts before display; stable check/subject identity | Agreed in latest constraints | API |
-| D06 | Initial case type `unpaid_goods_invoice`, TND | Proposed default; confirm | Both |
-| D07 | React/TypeScript, FastAPI, PostgreSQL, one DB worker | Proposed implementation default; confirm | Both |
-| D08 | AI provider/model and usable credit balance | Unknown; do not share keys here | API |
-| D09 | Initial checklist author/reviewer and review date | Unassigned | API |
+| D06 | Initial case type `unpaid_goods_invoice`, TND | Implemented as the only supported category; no fallback | Both |
+| D07 | React/TypeScript, FastAPI, PostgreSQL, one DB worker | Implemented and running under Compose | Both |
+| D08 | AI provider/model and usable credit balance | **Still unknown.** `AI_MODE=fixture`; the live adapter is written against an OpenAI-compatible `/chat/completions` endpoint but has never been called. Do not share keys here | API |
+| D09 | Initial checklist author/reviewer and review date | **Still unassigned**, which is why `legal_coverage` stays `unvalidated` | API |
 | D10 | French UI, Arabic/French sources | Proposed default; validate scan path | UI/API |
 | D11 | First reviewer demo identity/remit | Choose one authorized platform reviewer; no official filing claim | Both |
 
@@ -62,7 +82,23 @@ These choices can be confirmed asynchronously. They do not prevent the documenta
 
 UI update template: completed task, current task, exact blocked endpoint/field, evidence (commit/test/demo note), next handoff. Do not edit API status without coordination.
 
-### B9 gaps (UI provisional types, pending API confirmation)
+### B9 gaps resolved (API, PR #11–#13)
+
+Every provisional shape below was **confirmed by implementing it**, so the UI types were already correct except where noted. Where they disagreed, the backend was changed to match the UI rather than the reverse.
+
+Confirmed exactly as the UI assumed: the `X-CSRF-Token` and `Idempotency-Key` header names; `AuthUser` (`id`, `email`, `role`, `display_name`); `FollowUpAnswer` (`{question_id, answer}`); `CaseSummary`; the `GET /cases/{id}` composition (`latest_job`, `latest_analysis`, `submissions`, `activity`, `responses`); `FindingResponse`; `ReconciliationResult` (`documented_balance`, `currency`, `source_fact_ids`, `coverage_note`); `Recipient`; `Submission`; `SubmissionSummary`; `ReviewerSubmissionSummary` (`revision` is present, not optional); `ReviewEvent`; `ReviewerSubmissionDetail`; `ActivityEvent`.
+
+Changed on the **backend** to match the UI: `ConfigLimits` is `max_active_files`/`max_total_pages`/`max_file_bytes`/`max_case_bytes` (plus `supported_mime_types`); `legal_coverage` on `/config` is the case-type → status map; `DocumentRecord` is `document_id`/`filename`/`document_type`/`pages`/`uploaded_at`/`state`/`error`/`active`/`size_bytes`; `DocumentPage` is `document_id`/`page`/`image_url`/`source_text`/`method`/`quality`.
+
+Additions the UI should know about:
+
+- `field_errors[].field` is **claim-relative** (`claimed_amount`, `dates.invoice`, `narrative`), not `body.`-prefixed, which is what `normalizeFieldKey` needs.
+- `DocumentPage.quality` is a short label (`ready` / `partial` / `unreadable`), and `image_url` resolves to `GET /api/documents/{id}/pages/{page}/image` for OCR'd scans, `null` for embedded-text pages.
+- `CheckFinding.subject_label` is populated from the backend's stable subject record.
+- `RecipientOut` carries an extra `remit` string; ignore it if unused.
+- Reviewers may read submitted originals through `GET /api/documents/{id}/content` and the page routes.
+
+### Original provisional list (kept for reference)
 
 B9 (backend.md) is authoritative but does not spell out every field name or inner shape. Where a route or object was described in prose only, `frontend/src/api/types.ts` defines a minimal provisional TypeScript type (each marked `// PROVISIONAL (B9 gap): ...` in the source) consistent with B9 conventions (`{items,next_cursor}`, the error envelope, decimal strings, UTC ISO timestamps). Confirm with API before relying on these shapes past UI-02:
 
@@ -99,20 +135,20 @@ None of these are load-bearing for UI-02 (fixture mode only needs internal consi
 
 | ID | Task | Status | Depends on | Evidence / notes |
 | --- | --- | --- | --- | --- |
-| API-01 | Confirm B9 and synthetic expected outcomes with UI | Not started | Joint contract review | |
-| API-02 | App/DB migrations, sessions and authorization | Not started | Development authorization | |
-| API-03 | Intake schema and cheap gate | Not started | API-01, API-02 | |
-| API-04 | File/page registry and OCR/text path | Not started | API-02 | |
-| API-05 | Reviewed checklist/pack or explicit unvalidated coverage mode | Not started | D06, D09 | |
-| API-06 | Stage 1 extraction and conservative provenance validation | Not started | API-04; D08 needed for live mode only | Fixture mode can proceed first |
-| API-07 | Stage 2 supplied-check judgments and publish validation | Not started | API-05, API-06 | |
-| API-08 | Decimal reconciliation and stable subject/finding identity | Not started | API-06 | |
-| API-09 | Durable jobs, caching, revision and cost controls | Not started | API-02 | |
-| API-10 | Exports and immutable reviewer submission | Not started | API-07–API-09 | |
-| API-11 | Compose, seed accounts and actual startup guide verification | Not started | API-02 | |
-| API-12 | BE-01–BE-15 and live credit-limited smoke check | Not started | API-03–API-11 | |
+| API-01 | Confirm B9 and synthetic expected outcomes with UI | Done | Joint contract review | Backend payloads were aligned to `frontend/src/api/types.ts` rather than the reverse; the renames are listed under "B9 gaps resolved" below. PR #11. |
+| API-02 | App/DB migrations, sessions and authorization | Done | — | PR #10. Server sessions (HttpOnly `sid`), per-session CSRF on every unsafe method, server-assigned roles, 404-not-403 on case resources. |
+| API-03 | Intake schema and cheap gate | Done | API-01, API-02 | PR #11. Deterministic rules only, zero provider calls. **B3 step 3 (semantic gate call) deliberately not implemented** per B12; `gate_unavailable` is therefore never returned. |
+| API-04 | File/page registry and OCR/text path | Done | API-02 | PR #10. pdfplumber embedded text, pdfium render + Tesseract `fra+ara+eng` fallback, limits enforced before parsing. OCR accuracy on Arabic/French scans is **untested**. |
+| API-05 | Reviewed checklist/pack or explicit unvalidated coverage mode | Done (unvalidated mode) | D06, D09 | PR #10/#11. `tn-goods-v1` ships 6 checks, every one with `legal_reference_ids: []`. Loader refuses to promote an unreviewed pack. D09 unassigned, so coverage stays `unvalidated`. |
+| API-06 | Stage 1 extraction and conservative provenance validation | Done | API-04 | PR #12. Exact quote containment under a versioned normalization policy, value anchored inside its own quote, no fuzzy matching; failures stored quarantined so `coverage.rejected_facts` is real. Cached by case + content hash + versions. |
+| API-07 | Stage 2 supplied-check judgments and publish validation | Done | API-05, API-06 | PR #12. Unknown/duplicate pairs rejected, uncited `satisfied`/`contradicted` downgraded, absence qualified as `SOURCE_UNREADABLE`/`PARTIAL_COVERAGE` when coverage was incomplete. |
+| API-08 | Decimal reconciliation and stable subject/finding identity | Done | API-06 | PR #12. `Decimal` only, no conversion, negative balance preserved as possible overpayment, unresolved when any input or link is ambiguous. Findings keyed `(case_id, check_id, subject_id)`. |
+| API-09 | Durable jobs, caching, revision and cost controls | Partly done | API-02 | PR #12. Lease/heartbeat, bounded attempts, `SKIP LOCKED` claiming, idempotency keys, one active assessment per case, revision pinning with `superseded`. **Not done: the B8 spend reservation.** `UsageRecord` exists but nothing writes to it and `AI_DEMO_BUDGET_USD` is not yet enforced — irrelevant in fixture mode, must be built before live mode. |
+| API-10 | Exports and immutable reviewer submission | Done | API-07–API-09 | PR #13. ZIP with summary PDF, evidence index, checks, responses, originals and a manifest carrying the disclosures. Submissions freeze claim/documents/run/responses. |
+| API-11 | Compose, seed accounts and actual startup guide verification | Done | API-02 | The documented L4 sequence was executed against this repo and works. `compose.yaml` now publishes the db on `127.0.0.1:55432` for the host test loop — remove that mapping for anything deployed. |
+| API-12 | BE-01–BE-15 and live credit-limited smoke check | Partly done | API-03–API-11 | 71 passed, 1 skipped. Covered: BE-01–BE-04, BE-06–BE-12, BE-14. **Not covered: BE-05 and BE-13 have no dedicated tests** (the schemas enforce them structurally, but that is not the same as a test), and **BE-15 (prompt injection) is untested**. The live credit-limited smoke check has not been run at all. |
 
-API is the heavier track. Keep one provider/category and finish the validated response contract early so UI can integrate. Optional intake semantic AI can be deferred; source verification and deterministic calculations cannot.
+API is the heavier track. Source verification and deterministic calculations are in place; the optional intake semantic AI was the thing dropped, as B12 prescribes.
 
 ## P5. Joint handoff schedule
 
@@ -131,16 +167,19 @@ If behind, cut polish, registration, email, analytics and broader case types fir
 
 ## P6. Demo checklist
 
-- [ ] Create one synthetic preparer case with a 20,000 TND claim.
-- [ ] Missing delivery evidence produces a validated finding.
-- [ ] Add acceptable delivery evidence and a linked 5,000 TND payment.
-- [ ] Reassessment preserves finding identity and recognizes the new evidence.
-- [ ] Backend calculates 15,000 TND documented balance and flags the claim discrepancy.
-- [ ] User correction or disagreement is preserved without making evidence true by assertion.
-- [ ] Submit a reviewed snapshot to the assigned reviewer.
-- [ ] Reviewer opens the exact version, including unresolved issues if any.
-- [ ] Provider failure and unreadable evidence display honestly.
-- [ ] Record actual latency, token cost and sample size; no unmeasured years-saved claim.
+Verified over HTTP against the containerised API and worker in `AI_MODE=fixture`, and separately in the test suite. **Not yet driven through the browser** — that is UI-09.
+
+- [x] Create one synthetic preparer case with a 20,000 TND claim. (`intake=ready`, revision 1)
+- [x] Missing delivery evidence produces a validated finding. (`delivery_evidence` → `unassessable` / `EVIDENCE_NOT_FOUND`, `finding_status=open`, `delta=new`)
+- [x] Add acceptable delivery evidence and a linked 5,000 TND payment.
+- [x] Reassessment preserves finding identity and recognizes the new evidence. (same `finding_id`, `delta=resolved`)
+- [x] Backend calculates 15,000 TND documented balance and flags the claim discrepancy. (`documented_balance="15000.000"`, `claim_amount_matches_records` → `contradicted` / `CONFLICT`)
+- [x] User correction or disagreement is preserved without making evidence true by assertion. (a response bumps the revision and never changes `finding_status`)
+- [x] Submit a reviewed snapshot to the assigned reviewer.
+- [x] Reviewer opens the exact version, including unresolved issues. (claim still `20000.000` after the preparer edited it to `15000.000`)
+- [x] Unreadable evidence displays honestly. (no Tesseract on the host → page `unreadable`, document `unreadable`, request still succeeds; absence claims downgrade to `SOURCE_UNREADABLE`)
+- [ ] **Provider failure path is untested.** Fixture mode cannot fail the way a provider does. The code path exists (`PROVIDER_UNAVAILABLE`, retryable, no fixture fallback) but has never been exercised.
+- [ ] **No latency, token or cost figures recorded.** Fixture mode makes no provider call, so there is nothing to measure yet. Do not present any performance or cost number for this build.
 
 ## P7. Change and blocker log
 
@@ -148,5 +187,12 @@ If behind, cut polish, registration, email, analytics and broader case types fir
 | --- | --- | --- | --- |
 | Spec baseline | Documentation | Created four Markdown planning files; no app code or servers | UI/API can review and assign names |
 | Contract review | Documentation | Checked JSON examples, local links, revision handling and export job results | Documentation checks passed; implementation tests remain unrun |
+| Repo cleanup | API | Two stale git worktrees and four dead branches; `feat/backend-documents` and `feat/backend-legal-pack` were merged locally but never pushed, so `origin/master` was missing finished backend work | Worktrees and branches removed; the missing commits shipped as PR #10. Work now goes through one branch + PR per milestone (#10–#14). |
+| Payload alignment | API | The backend's document/page/config field names disagreed with `frontend/src/api/types.ts`, which the UI had already built against | Backend renamed to match the UI (PR #11). Breaking for anyone on the old names; the full list is under "B9 gaps resolved". |
+| Checklist change | API | `payment_or_credit_note_evidence` had `subject_type: payment`, so it could not be instantiated when no payment existed — the case where the check matters most | Changed to `invoice`, and added `claim_amount_matches_records` with `basis="reconciliation"` as the code-decided reconciliation check. `basis == "reconciliation"` now means "never sent to the model". |
+| Fabricated amounts | API | The fixture extractor read `VIR-889021` and `2026-07-15` as payment amounts because those lines mention "virement"/"paiement", inventing payments and corrupting the balance | A numeric token now only counts as monetary with an adjacent currency label, or on a line that states an amount and carries exactly one number. Missing a real amount leaves a check unassessable; inventing one corrupts a conclusion. |
+| Subject identity | API | Enriching a subject's `identifiers` (recording a discovered invoice number) broke the natural-key equality match on the next run, allocating a second subject and a second finding — a silent BE-10 violation | Natural keys are matched as a **subset** of stored identifiers. Caught by the reassessment test asserting a stable `finding_id`. |
+| Local db port | API | The test suite and a host-run uvicorn could not reach the Compose database | `compose.yaml` publishes `127.0.0.1:55432:5432`. Deliberately not 5432, and bound to loopback. **Remove for any deployed environment.** |
+| Open gaps | API | Spend reservation (`AI_DEMO_BUDGET_USD`, `UsageRecord`) is unimplemented; BE-05, BE-13 and BE-15 are untested; no live provider call has ever been made | Must be closed before `AI_MODE=live` is switched on. Tracked in API-09 and API-12. |
 
 Before changing an endpoint, enum or schema: update backend.md B9, note the change here, tell the other contributor and update UI fixtures in the same handoff. Keep secrets and real case contents out of this tracker.
