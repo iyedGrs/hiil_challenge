@@ -15,19 +15,29 @@ No network or AI provider call: ``AI_MODE`` is ``fixture``.
 from __future__ import annotations
 
 import io
-import json
 import zipfile
 
+import pdfplumber
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import CSRF_HEADER_NAME
 from app.domain.enums import AnalysisStatus, CheckResult, ExecutionMode, ExportState, JobStatus, SubmissionState
+from app.files import sha256_hex
 from app.models.analysis import Analysis, CheckResultRow
+from app.models.document import Document
 from app.models.job import Job
 from app.models.submission import Export
-from app.pipeline.export import handle_export_job
+from app.pipeline.export import (
+    date_fact_kind_for_document_type,
+    handle_export_job,
+    reference_fact_kind_for_document_type,
+    sanitize_case_reference,
+    sanitize_piece_filename,
+    select_fact_value,
+)
 from tests.conftest import DEMO_PASSWORD, DEMO_PREPARER_EMAIL, DEMO_REVIEWER_EMAIL
 from tests.test_analysis import (
     DELIVERY_LINES,
@@ -38,6 +48,12 @@ from tests.test_analysis import (
     run_analysis,
     upload,
 )
+
+
+def _pdf_text(data: bytes) -> str:
+    """Extract plain text from PDF ``data`` for content assertions."""
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 SECOND_PREPARER_EMAIL = "preparer2@demo.local"
 
@@ -316,10 +332,17 @@ def test_review_event_updates_state_and_reaches_preparer_activity(
     assert "submission_sent" in types
 
 
+EXPECTED_TOP_LEVEL_PDFS = (
+    "01_requete_introductive_instance.pdf",
+    "02_bordereau_des_pieces.pdf",
+    "03_resume_verification.pdf",
+)
+
+
 def test_export_produces_a_real_package_with_disclosures(
     client: TestClient, db: Session, seeded: None
 ) -> None:
-    """B10: one ZIP with summary, checks, originals and a manifest."""
+    """B10: one ZIP with the claim, bordereau, summary and the original pieces."""
     case_id, revision, analysis_id, headers = prepared_case(client, db)
 
     started = client.post(
@@ -346,31 +369,249 @@ def test_export_produces_a_real_package_with_disclosures(
     assert export.state is ExportState.ready
     assert export.sha256 and export.byte_size
 
+    # Disclosures travel with the export even though no manifest.json ships in
+    # the ZIP: the record is kept internally on export.manifest (B10).
+    assert export.manifest["legal_coverage"] == "unvalidated"
+    assert export.manifest["claim_is_an_allegation"] is True
+    assert "No legal advice" in export.manifest["notice"]
+
     content = client.get(f"/api/exports/{export_id}/content")
     assert content.status_code == 200
     assert content.headers["content-type"] == "application/zip"
+    assert (
+        content.headers["content-disposition"]
+        == f'attachment; filename="e-ethbet-dossier-{case_id}.zip"'
+    )
+
+    active_documents = list(
+        db.scalars(
+            select(Document)
+            .where(Document.case_id == case_id, Document.is_active.is_(True))
+            .order_by(Document.created_at, Document.id)
+        ).all()
+    )
 
     with zipfile.ZipFile(io.BytesIO(content.content)) as archive:
         names = archive.namelist()
-        assert "manifest.json" in names
-        assert "resume.pdf" in names
-        assert "verifications.json" in names
-        assert "index_des_pieces.json" in names
-        assert any(name.startswith("originaux/") for name in names)
+        piece_names = sorted(name for name in names if name.startswith("pieces/"))
 
-        manifest = json.loads(archive.read("manifest.json"))
-        # Disclosures travel with the package, not only in the app (B10).
-        assert manifest["legal_coverage"] == "unvalidated"
-        assert "legal_coverage_unvalidated" in manifest["disclosures"]
-        assert manifest["acknowledge_unresolved"] is True
-        assert manifest["claim_is_an_allegation"] is True
-        assert "No legal advice" in manifest["notice"]
+        # Exactly the 3 PDFs plus one piece per active document, nothing else.
+        assert sorted(names) == sorted(list(EXPECTED_TOP_LEVEL_PDFS) + piece_names)
+        assert not any(name.lower().endswith(".json") for name in names)
+        assert len(piece_names) == len(active_documents)
+        assert all(name.startswith("pieces/") for name in names if name not in EXPECTED_TOP_LEVEL_PDFS)
 
-        checks = json.loads(archive.read("verifications.json"))
-        assert checks, "the package lists the validated checks"
-        assert all(entry["legal_reference_ids"] == [] for entry in checks)
+        for pdf_name in EXPECTED_TOP_LEVEL_PDFS:
+            data = archive.read(pdf_name)
+            assert data.startswith(b"%PDF")
+            assert len(data) > 1000
+            # Header and page numbering are drawn on every page.
+            text = _pdf_text(data)
+            assert f"e-ethbet — {case_id}" in text
+            assert "Page 1 / " in text
 
-        assert archive.read("resume.pdf").startswith(b"%PDF")
+        claim_text = _pdf_text(archive.read("01_requete_introductive_instance.pdf"))
+        assert "REQUÊTE INTRODUCTIVE D’INSTANCE" in claim_text
+        assert "BORDEREAU DES PIÈCES" in _pdf_text(archive.read("02_bordereau_des_pieces.pdf"))
+
+        # Every active document appears exactly once, in upload order, with the
+        # exact stored bytes.
+        expected_order = [
+            f"pieces/P{index:02d}_" for index in range(1, len(active_documents) + 1)
+        ]
+        for prefix, document in zip(expected_order, active_documents, strict=True):
+            matches = [name for name in piece_names if name.startswith(prefix)]
+            assert len(matches) == 1
+            data = archive.read(matches[0])
+            assert sha256_hex(data) == document.sha256
+
+
+def test_export_numbering_matches_across_claim_and_bordereau(
+    client: TestClient, db: Session, seeded: None
+) -> None:
+    """Piece numbering is computed once and shared by every rendered document."""
+    case_id, revision, analysis_id, headers = prepared_case(client, db)
+    started = client.post(
+        f"/api/cases/{case_id}/exports",
+        headers={**headers, "Idempotency-Key": "export-numbering"},
+        json={"expected_revision": revision, "analysis_id": analysis_id, "acknowledge_unresolved": True},
+    )
+    run_export_job(client, db, started.json()["job_id"])
+    content = client.get(f"/api/exports/{started.json()['export_id']}/content")
+
+    with zipfile.ZipFile(io.BytesIO(content.content)) as archive:
+        piece_names = sorted(name for name in archive.namelist() if name.startswith("pieces/"))
+        bordereau_text = _pdf_text(archive.read("02_bordereau_des_pieces.pdf"))
+        claim_text = _pdf_text(archive.read("01_requete_introductive_instance.pdf"))
+
+    for piece_name in piece_names:
+        # e.g. "pieces/P01_facture.pdf" -> "P01_facture.pdf"
+        filename = piece_name.split("pieces/", 1)[1]
+        assert filename in bordereau_text
+    assert "P01" in claim_text
+
+
+def test_export_fails_when_an_original_is_missing(
+    client: TestClient, db: Session, seeded: None
+) -> None:
+    """A missing original never produces a partial package (B10)."""
+    case_id, revision, analysis_id, headers = prepared_case(client, db)
+    document = db.scalar(select(Document).where(Document.case_id == case_id))
+    assert document is not None
+
+    from app.config import get_settings
+    from app.files import storage_path
+
+    path = storage_path(get_settings().file_storage_root, document.storage_key)
+    path.unlink()
+
+    started = client.post(
+        f"/api/cases/{case_id}/exports",
+        headers={**headers, "Idempotency-Key": "export-missing"},
+        json={"expected_revision": revision, "analysis_id": analysis_id, "acknowledge_unresolved": True},
+    )
+    # handle_export_job re-raises after marking the export failed (mirrors
+    # app/worker.py, which catches this at the job-loop level).
+    from app.errors import ApiError
+
+    with pytest.raises(ApiError):
+        run_export_job(client, db, started.json()["job_id"])
+
+    export = db.get(Export, started.json()["export_id"])
+    assert export is not None
+    assert export.state is ExportState.failed
+
+    content = client.get(f"/api/exports/{started.json()['export_id']}/content")
+    assert content.status_code == 409
+
+
+def test_export_amounts_reflect_stored_reconciliation(
+    client: TestClient, db: Session, seeded: None
+) -> None:
+    """Amounts in the claim PDF come only from the stored reconciliation (B7)."""
+    case_id, revision, analysis_id, headers = prepared_case(client, db)
+    analysis = db.get(Analysis, analysis_id)
+    assert analysis is not None
+
+    started = client.post(
+        f"/api/cases/{case_id}/exports",
+        headers={**headers, "Idempotency-Key": "export-amounts"},
+        json={"expected_revision": revision, "analysis_id": analysis_id, "acknowledge_unresolved": True},
+    )
+    run_export_job(client, db, started.json()["job_id"])
+    content = client.get(f"/api/exports/{started.json()['export_id']}/content")
+    with zipfile.ZipFile(io.BytesIO(content.content)) as archive:
+        claim_text = _pdf_text(archive.read("01_requete_introductive_instance.pdf"))
+
+    assert "20000.000" in claim_text
+    if analysis.reconciliation:
+        balance = str(analysis.reconciliation["documented_balance"])
+        assert balance in claim_text
+    else:  # pragma: no cover - depends on fixture data shape
+        assert "Non renseign" in claim_text
+
+
+def test_export_with_no_reconciliation_shows_non_renseigne(
+    client: TestClient, db: Session, seeded: None
+) -> None:
+    """No stored reconciliation -> the balance row reads "Non renseigné"."""
+    case_id, revision, analysis_id, headers = prepared_case(client, db)
+    analysis = db.get(Analysis, analysis_id)
+    assert analysis is not None
+    analysis.reconciliation = None
+    db.commit()
+
+    started = client.post(
+        f"/api/cases/{case_id}/exports",
+        headers={**headers, "Idempotency-Key": "export-no-reco"},
+        json={"expected_revision": revision, "analysis_id": analysis_id, "acknowledge_unresolved": True},
+    )
+    run_export_job(client, db, started.json()["job_id"])
+    content = client.get(f"/api/exports/{started.json()['export_id']}/content")
+    with zipfile.ZipFile(io.BytesIO(content.content)) as archive:
+        claim_text = _pdf_text(archive.read("01_requete_introductive_instance.pdf"))
+
+    assert "renseign" in claim_text.lower()  # "Non renseigné"
+    assert "Aucun rapprochement" in claim_text
+
+
+def test_export_missing_info_uses_placeholders(
+    client: TestClient, db: Session, seeded: None
+) -> None:
+    """No court/lawyer data exists, so the claim PDF says so explicitly (never invented)."""
+    case_id, revision, analysis_id, headers = prepared_case(client, db)
+    started = client.post(
+        f"/api/cases/{case_id}/exports",
+        headers={**headers, "Idempotency-Key": "export-placeholders"},
+        json={"expected_revision": revision, "analysis_id": analysis_id, "acknowledge_unresolved": True},
+    )
+    run_export_job(client, db, started.json()["job_id"])
+    content = client.get(f"/api/exports/{started.json()['export_id']}/content")
+    with zipfile.ZipFile(io.BytesIO(content.content)) as archive:
+        claim_text = _pdf_text(archive.read("01_requete_introductive_instance.pdf"))
+        bordereau_text = _pdf_text(archive.read("02_bordereau_des_pieces.pdf"))
+
+    assert "compl" in claim_text.lower()  # "À compléter" (tribunal, fondement juridique)
+    assert claim_text.lower().count("compl") >= 2
+    assert "renseign" in bordereau_text.lower()  # "Non renseigné" on at least one row
+
+
+@pytest.mark.parametrize(
+    ("raw", "forbidden"),
+    [
+        ("../../etc/passwd", ("..", "/", "\\")),
+        ("..\\..\\x.pdf", ("..", "/", "\\")),
+        ("a/b/c.pdf", ("/", "\\")),
+        ("  .hidden.pdf", ()),
+        ("facture été.pdf", ()),
+    ],
+)
+def test_sanitize_piece_filename_blocks_path_traversal(raw: str, forbidden: tuple[str, ...]) -> None:
+    """B10: a client filename can never escape the ``pieces/`` directory."""
+    safe = sanitize_piece_filename(raw)
+    for token in forbidden:
+        assert token not in safe
+    assert safe, "sanitization must never produce an empty name"
+    if raw.endswith(".pdf"):
+        assert safe.endswith(".pdf")
+
+
+def test_sanitize_piece_filename_falls_back_to_document() -> None:
+    assert sanitize_piece_filename("") == "document"
+    assert sanitize_piece_filename("...") == "document"
+
+
+def test_sanitize_case_reference_strips_unsafe_characters() -> None:
+    assert sanitize_case_reference("CASE_abc-123") == "CASE_abc-123"
+    assert sanitize_case_reference("CASE/abc?123") == "CASE_abc_123"
+
+
+def test_reference_and_date_selection_never_borrow_the_wrong_kind() -> None:
+    """A delivery note carrying only an invoice_number must show Non renseigné,
+    never the invoice's own reference (spec export)."""
+    from app.ai.contracts import FactKind
+
+    class _StubFact:
+        def __init__(self, document_id: str, kind: str, value_text: str, page: int, created_at: int, id: str) -> None:
+            self.document_id = document_id
+            self.kind = kind
+            self.value_text = value_text
+            self.page = page
+            self.created_at = created_at
+            self.id = id
+
+    facts = [_StubFact("DOC_dn", FactKind.invoice_number.value, "2026-014", 1, 0, "f1")]
+
+    # delivery_note has no reference fact kind at all.
+    assert reference_fact_kind_for_document_type("delivery_note") is None
+    assert (
+        select_fact_value(facts, document_id="DOC_dn", kind=reference_fact_kind_for_document_type("delivery_note"))
+        is None
+    )
+    # And it must not accidentally match the invoice kind either.
+    assert select_fact_value(facts, document_id="DOC_dn", kind="order_reference") is None
+    # Nor does it have a date fact kind.
+    assert date_fact_kind_for_document_type("delivery_note") == FactKind.delivery_date.value
 
 
 def test_export_requires_a_current_published_analysis(
