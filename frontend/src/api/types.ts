@@ -225,6 +225,10 @@ export interface EvidenceRef {
 export interface CheckFinding {
   check_id: string;
   subject_id: string;
+  // PROVISIONAL (B9 gap): frontend.md F4 requires a "plain subject label" on
+  // every finding card; B9's JSON example does not include one (only the
+  // opaque check_id/subject_id).
+  subject_label: string;
   finding_id: string;
   result: CheckResult;
   reason_code: ReasonCode;
@@ -312,6 +316,14 @@ export interface CaseDetail {
   latest_analysis: Analysis | null;
   submissions: SubmissionSummary[];
   activity: ActivityEvent[];
+  // PROVISIONAL (B9 gap): frontend.md F4 requires showing "the previous
+  // preparer response" on a finding card after navigating away and back, but
+  // B9 has no route to list saved finding responses for a case's current
+  // working revision (only `POST /findings/{id}/responses` echoes the one it
+  // just saved, and `ReviewerSubmissionDetail.responses` is a frozen
+  // snapshot). Assumed `GET /cases/{id}` also returns every saved response
+  // for the case's still-open findings.
+  responses: FindingResponse[];
 }
 
 // ---------------------------------------------------------------------------

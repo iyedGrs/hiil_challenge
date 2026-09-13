@@ -143,6 +143,7 @@ function toCaseDetail(c: StoredCase): CaseDetail {
     latest_analysis: latestAnalysis ? structuredClone(latestAnalysis) : null,
     submissions: structuredClone(c.submissions),
     activity: structuredClone(c.activity),
+    responses: Object.values(c.responses).map((r) => structuredClone(r)),
   };
 }
 

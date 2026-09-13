@@ -195,10 +195,14 @@ export const DEMO_DOCUMENT_PAGES: Record<string, DocumentPage[]> = {
   ],
 };
 
-/** The exact published check from frontend.md F5. */
+/**
+ * The exact published check from frontend.md F5, plus its plain subject
+ * label (PROVISIONAL B9 gap, see types.ts CheckFinding.subject_label).
+ */
 export const DEMO_CASE_CHECK: CheckFinding = {
   check_id: "delivery_evidence",
   subject_id: "invoice_0001",
+  subject_label: "Preuve de livraison — facture n° 0001",
   finding_id: "finding_delivery_invoice_0001",
   result: "unassessable",
   reason_code: "EVIDENCE_NOT_FOUND",
@@ -210,4 +214,90 @@ export const DEMO_CASE_CHECK: CheckFinding = {
   reviewed_document_ids: ["DOC_001", "DOC_002"],
   legal_reference_ids: [],
   actions: ["add_evidence", "explain_unavailable", "disagree"],
+};
+
+/** Satisfied finding citing both a French page (DOC_001) and the seeded Arabic page (DOC_005). */
+export const DEMO_CASE_CHECK_SATISFIED: CheckFinding = {
+  check_id: "invoice_issuance",
+  subject_id: "invoice_0001",
+  subject_label: "Émission de la facture — facture n° 0001",
+  finding_id: "finding_invoice_issuance_0001",
+  result: "satisfied",
+  reason_code: "EVIDENCE_FOUND",
+  finding_status: "resolved",
+  delta: "resolved",
+  basis: "checklist",
+  message: "La facture correspond à la réclamation et est corroborée par la correspondance versée au dossier.",
+  evidence_refs: [
+    { fact_id: "fact_invoice_amount", document_id: "DOC_001", page: 1, source_text: "Facture n° 0001 — Mobilier de bureau livré le 10/06/2026. Montant total : 20 000,000 TND." },
+    { fact_id: "fact_claim_correspondence", document_id: "DOC_005", page: 1, source_text: "نطالب بتسوية باقي المستحقات المتعلقة بالفاتورة رقم 0001 في أقرب الآجال." },
+  ],
+  reviewed_document_ids: ["DOC_001", "DOC_005"],
+  legal_reference_ids: [],
+  actions: ["disagree"],
+};
+
+/** Unassessable finding pointing at the seeded unreadable document. */
+export const DEMO_CASE_CHECK_UNREADABLE: CheckFinding = {
+  check_id: "correspondence_readability",
+  subject_id: "correspondance_chiffree",
+  subject_label: "Lisibilité — correspondance jointe",
+  finding_id: "finding_correspondence_readability_0001",
+  result: "unassessable",
+  reason_code: "SOURCE_UNREADABLE",
+  finding_status: "open",
+  delta: "new",
+  basis: "deterministic",
+  message: "Ce document n'a pas pu être analysé : le fichier est illisible ou protégé.",
+  evidence_refs: [],
+  reviewed_document_ids: [],
+  legal_reference_ids: [],
+  actions: ["add_evidence", "explain_unavailable", "disagree"],
+};
+
+/** Code-owned not_applicable finding (B9: "the last is set by code"). */
+export const DEMO_CASE_CHECK_NOT_APPLICABLE: CheckFinding = {
+  check_id: "payment_plan_terms",
+  subject_id: "requested_outcome",
+  subject_label: "Modalités d'échelonnement",
+  finding_id: "finding_payment_plan_terms_0001",
+  result: "not_applicable",
+  reason_code: "NOT_APPLICABLE",
+  finding_status: null,
+  delta: "not_applicable",
+  basis: "claim",
+  message: "Ce contrôle ne s'applique pas : le paiement échelonné n'a pas été demandé pour ce dossier.",
+  evidence_refs: [],
+  reviewed_document_ids: [],
+  legal_reference_ids: [],
+  actions: [],
+};
+
+/** Contradicted amount-reconciliation finding (F5 "code-generated amount discrepancy"). */
+export const DEMO_CASE_CHECK_AMOUNT_DISCREPANCY: CheckFinding = {
+  check_id: "claimed_amount_reconciliation",
+  subject_id: "invoice_0001",
+  subject_label: "Cohérence du montant réclamé",
+  finding_id: "finding_amount_reconciliation_0001",
+  result: "contradicted",
+  reason_code: "CONFLICT",
+  finding_status: "open",
+  delta: "new",
+  basis: "deterministic",
+  message: "Le montant réclamé diffère du solde documenté par les pièces fournies.",
+  evidence_refs: [
+    { fact_id: "fact_receipt_partial", document_id: "DOC_003", page: 1, source_text: "Reçu partiel — [zone illisible] ... solde restant [zone illisible]." },
+  ],
+  reviewed_document_ids: ["DOC_001", "DOC_002", "DOC_003"],
+  legal_reference_ids: [],
+  actions: ["correct_claim", "disagree"],
+};
+
+/** P6: backend calculates a 15,000 TND documented balance against the 20,000 TND claim. */
+export const DEMO_CASE_RECONCILIATION = {
+  documented_balance: "15000.000",
+  currency: "TND",
+  source_fact_ids: ["fact_invoice_amount", "fact_receipt_partial"],
+  coverage_note:
+    "Solde calculé à partir des pièces lisibles ; le reçu partiel n'a pas pu être totalement vérifié.",
 };
