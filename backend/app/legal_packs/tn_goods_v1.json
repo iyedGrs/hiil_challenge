@@ -1,0 +1,93 @@
+{
+  "version": "tn-goods-v1",
+  "case_type": "unpaid_goods_invoice",
+  "review_status": "draft",
+  "coverage": "unvalidated",
+  "source_label": "Hackathon demo pack for Tunisian unpaid-goods-invoice disputes. Authored for this prototype without review by a Tunisian legal practitioner. Contains only illustrative document-existence and evidence-guidance checks; nothing here is a certified statutory requirement.",
+  "labels": {
+    "disclosure": "This legal pack has not been reviewed by a lawyer. Every check below is either a document-existence checklist item or non-binding evidence guidance (basis=\"checklist\" or \"evidence_guidance\"), never a cited statutory requirement. legal_coverage stays \"unvalidated\" until a reviewed pack replaces this asset.",
+    "authoring_note": "Built for a hackathon demo. Do not present any check here as legal advice or as proof a Tunisian law firm reviewed the underlying provisions."
+  },
+  "legal_references": [],
+  "checks": [
+    {
+      "check_id": "invoice_issued",
+      "label": "Invoice exists and is readable",
+      "basis": "checklist",
+      "legal_reference_ids": [],
+      "review_status": "draft",
+      "applies_when": {"case_type": "unpaid_goods_invoice"},
+      "subject_type": "invoice",
+      "satisfied_by": [
+        {"type": "invoice_document_readable", "required_links": ["parties", "transaction"]}
+      ],
+      "actions": ["add_evidence", "correct_claim", "explain_unavailable", "disagree"],
+      "sort_order": 10
+    },
+    {
+      "check_id": "contract_or_order_evidence",
+      "label": "Evidence of the underlying contract or order",
+      "basis": "evidence_guidance",
+      "legal_reference_ids": [],
+      "review_status": "draft",
+      "applies_when": {"case_type": "unpaid_goods_invoice"},
+      "subject_type": "transaction",
+      "satisfied_by": [
+        {"type": "signed_contract", "required_links": ["parties", "transaction"]},
+        {"type": "purchase_order", "required_links": ["parties", "transaction"]},
+        {"type": "order_confirmation_correspondence", "required_links": ["parties", "transaction"]}
+      ],
+      "actions": ["add_evidence", "explain_unavailable", "disagree"],
+      "sort_order": 20
+    },
+    {
+      "check_id": "delivery_evidence",
+      "label": "Evidence supporting receipt of goods",
+      "basis": "evidence_guidance",
+      "legal_reference_ids": [],
+      "review_status": "draft",
+      "applies_when": {"case_type": "unpaid_goods_invoice"},
+      "subject_type": "invoice",
+      "satisfied_by": [
+        {"type": "delivery_acknowledgment", "required_links": ["parties", "transaction"]},
+        {"type": "receipt_confirmation_correspondence", "required_links": ["parties", "transaction"]}
+      ],
+      "actions": ["add_evidence", "explain_unavailable", "disagree"],
+      "sort_order": 30
+    },
+    {
+      "check_id": "payment_or_credit_note_evidence",
+      "label": "Evidence of payments or credit notes to reconcile against the invoice",
+      "basis": "evidence_guidance",
+      "legal_reference_ids": [],
+      "review_status": "draft",
+      "applies_when": {"case_type": "unpaid_goods_invoice"},
+      "subject_type": "payment",
+      "satisfied_by": [
+        {"type": "bank_transfer_receipt", "required_links": ["parties", "transaction"]},
+        {"type": "payment_confirmation_correspondence", "required_links": ["parties", "transaction"]},
+        {"type": "credit_note_document", "required_links": ["parties", "transaction"]}
+      ],
+      "actions": ["add_evidence", "correct_claim", "explain_unavailable", "disagree"],
+      "sort_order": 40
+    },
+    {
+      "check_id": "referenced_attachment_present",
+      "label": "Presence of a contract-referenced annex",
+      "basis": "checklist",
+      "legal_reference_ids": [],
+      "review_status": "draft",
+      "applies_when": {"case_type": "unpaid_goods_invoice"},
+      "subject_type": "referenced_annex",
+      "satisfied_by": [
+        {"type": "annex_document_matching_reference", "required_links": ["referenced_annex"]},
+        {
+          "type": "annex_content_confirmed_in_correspondence",
+          "required_links": ["referenced_annex", "parties"]
+        }
+      ],
+      "actions": ["add_evidence", "explain_unavailable", "disagree"],
+      "sort_order": 50
+    }
+  ]
+}
