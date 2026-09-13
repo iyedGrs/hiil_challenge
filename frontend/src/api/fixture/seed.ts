@@ -1,4 +1,4 @@
-import type { AppConfig, AuthUser, CheckFinding, Claim, DocumentRecord, Recipient } from "../types";
+import type { AppConfig, AuthUser, CheckFinding, Claim, DocumentPage, DocumentRecord, Recipient } from "../types";
 
 /**
  * Fixture-only demo password for every seeded account. Never a real
@@ -70,6 +70,10 @@ export const DEMO_CASE_CLAIM: Claim = {
   follow_up_answers: [],
 };
 
+/**
+ * Demo case documents, covering every DocumentState the workspace must
+ * distinguish (frontend.md F4/FE-03) plus one Arabic-text page (FE-10).
+ */
 export const DEMO_CASE_DOCUMENTS: DocumentRecord[] = [
   {
     document_id: "DOC_001",
@@ -80,6 +84,7 @@ export const DEMO_CASE_DOCUMENTS: DocumentRecord[] = [
     state: "ready",
     error: null,
     active: true,
+    size_bytes: 182_340,
   },
   {
     document_id: "DOC_002",
@@ -90,8 +95,105 @@ export const DEMO_CASE_DOCUMENTS: DocumentRecord[] = [
     state: "ready",
     error: null,
     active: true,
+    size_bytes: 421_980,
+  },
+  {
+    document_id: "DOC_003",
+    filename: "recu_partiel.jpg",
+    document_type: "receipt",
+    pages: 1,
+    uploaded_at: "2026-06-11T09:04:00Z",
+    state: "partial",
+    error: "Une partie du texte n'a pas pu être extraite ; la qualité de l'image est faible.",
+    active: true,
+    size_bytes: 612_500,
+  },
+  {
+    document_id: "DOC_004",
+    filename: "correspondance_chiffree.pdf",
+    document_type: null,
+    pages: 1,
+    uploaded_at: "2026-06-11T09:06:00Z",
+    state: "unreadable",
+    error: "Ce fichier est illisible ou protégé ; il n'a pas pu être analysé.",
+    active: true,
+    size_bytes: 97_200,
+  },
+  {
+    document_id: "DOC_005",
+    filename: "lettre_reclamation_ar.pdf",
+    document_type: "correspondence",
+    pages: 1,
+    uploaded_at: "2026-06-11T09:08:00Z",
+    state: "ready",
+    error: null,
+    active: true,
+    size_bytes: 154_760,
   },
 ];
+
+/** Seeded page previews for `getDocumentPage` (B9 gap: shape assumed, see progress.md). */
+export const DEMO_DOCUMENT_PAGES: Record<string, DocumentPage[]> = {
+  DOC_001: [
+    {
+      document_id: "DOC_001",
+      page: 1,
+      image_url: null,
+      source_text:
+        "Facture n° 0001 — Mobilier de bureau livré le 10/06/2026. Montant total : 20 000,000 TND. Échéance de paiement : 10/07/2026.",
+      method: "embedded_text",
+      quality: "bonne",
+    },
+  ],
+  DOC_002: [
+    {
+      document_id: "DOC_002",
+      page: 1,
+      image_url: null,
+      source_text: "Contrat de fourniture signé le 01/06/2026 entre Amina Gharbi et Client Démo SARL.",
+      method: "embedded_text",
+      quality: "bonne",
+    },
+    {
+      document_id: "DOC_002",
+      page: 2,
+      image_url: null,
+      source_text: "Conditions de livraison et modalités de paiement — annexe signée par les deux parties.",
+      method: "embedded_text",
+      quality: "bonne",
+    },
+  ],
+  DOC_003: [
+    {
+      document_id: "DOC_003",
+      page: 1,
+      image_url: null,
+      source_text: "Reçu partiel — [zone illisible] ... solde restant [zone illisible].",
+      method: "ocr",
+      quality: "faible",
+    },
+  ],
+  DOC_004: [
+    {
+      document_id: "DOC_004",
+      page: 1,
+      image_url: null,
+      source_text: null,
+      method: null,
+      quality: "illisible",
+    },
+  ],
+  DOC_005: [
+    {
+      document_id: "DOC_005",
+      page: 1,
+      image_url: null,
+      source_text: "نطالب بتسوية باقي المستحقات المتعلقة بالفاتورة رقم 0001 في أقرب الآجال.",
+      method: "ocr",
+      quality: "bonne",
+    },
+  ],
+};
 
 /** The exact published check from frontend.md F5. */
 export const DEMO_CASE_CHECK: CheckFinding = {

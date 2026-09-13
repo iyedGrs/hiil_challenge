@@ -146,6 +146,9 @@ export interface DocumentRecord {
   state: DocumentState;
   error: string | null;
   active: boolean;
+  // PROVISIONAL (B9 gap): byte size is not enumerated on the document object;
+  // needed client-side to render the F3 per-case byte limit summary.
+  size_bytes: number;
 }
 
 // PROVISIONAL (B9 gap): page preview/source-text response shape is not

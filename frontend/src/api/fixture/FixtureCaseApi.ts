@@ -22,7 +22,7 @@ import type {
   ReviewerSubmissionSummary,
   Submission,
 } from "../types";
-import { FIXTURE_CONFIG, FIXTURE_RECIPIENTS, FIXTURE_USERS } from "./seed";
+import { DEMO_DOCUMENT_PAGES, FIXTURE_CONFIG, FIXTURE_RECIPIENTS, FIXTURE_USERS } from "./seed";
 import { createFixtureStore, type FixtureStore, type StoredCase } from "./store";
 
 function unauthenticated(): ApiError {
@@ -65,7 +65,29 @@ function toAuthUser(user: AuthUser): AuthUser {
   return { id, email, role, display_name };
 }
 
-/** Cheap deterministic gate — no model call, matching B3 for fixture mode. */
+/** B9/F3: PDF, JPEG and PNG only. */
+const ACCEPTED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+function unsupportedFile(): ApiError {
+  return new ApiError(415, {
+    error: { code: "UNSUPPORTED_FILE", message: "Format de fichier non pris en charge (PDF, JPEG ou PNG).", field_errors: [], retryable: false },
+  });
+}
+
+function fileLimit(message: string): ApiError {
+  return new ApiError(413, { error: { code: "FILE_LIMIT", message, field_errors: [], retryable: false } });
+}
+
+/** Matches a mention of the supplied goods/merchandise in French narrative text. */
+const GOODS_MENTION = /\bbiens?\b|\bmarchandises?\b|\bmatériel\b|\bfournitures?\b|\bproduits?\b/i;
+
+/**
+ * Cheap deterministic gate — no model call, matching B3 for fixture mode.
+ * Deterministic and consistent so the same claim always yields the same
+ * result: a narrative that never mentions the supplied goods stays
+ * `needs_information` until either the narrative is edited to mention them
+ * or the mapped follow-up question is answered (frontend.md F4/F5).
+ */
 function evaluateIntake(claim: Claim): Intake {
   const narrative = claim.narrative.trim();
   if (narrative.length < 30) {
@@ -80,6 +102,17 @@ function evaluateIntake(claim: Claim): Intake {
       ],
     };
   }
+
+  const answeredGoods = claim.follow_up_answers.some(
+    (a) => a.question_id === "describe_goods" && a.answer.trim().length > 0,
+  );
+  if (!GOODS_MENTION.test(narrative) && !answeredGoods) {
+    return {
+      status: "needs_information",
+      questions: [{ id: "describe_goods", field: "narrative", message: "Quels biens ont été fournis ?" }],
+    };
+  }
+
   return { status: "ready", questions: [] };
 }
 
@@ -231,26 +264,39 @@ export class FixtureCaseApi implements CaseApi {
     const record = this.requireCase(caseId);
     this.requireRevision(record, expectedRevision);
 
-    const existing = record.documents.find((d) => d.active && d.filename === file.name);
+    // Duplicate is identified by the server: same name and size among this
+    // case's active documents (B9: "exact duplicate upload"); no new revision.
+    const existing = record.documents.find((d) => d.active && d.filename === file.name && d.size_bytes === file.size);
     if (existing) {
       return { duplicate: true, document: structuredClone(existing), revision: record.revision };
     }
 
-    if (record.documents.filter((d) => d.active).length >= FIXTURE_CONFIG.limits.max_active_files) {
-      throw new ApiError(413, {
-        error: { code: "FILE_LIMIT", message: "Nombre maximal de fichiers atteint.", field_errors: [], retryable: false },
-      });
+    if (!ACCEPTED_MIME_TYPES.has(file.type)) throw unsupportedFile();
+    if (file.size > FIXTURE_CONFIG.limits.max_file_bytes) {
+      throw fileLimit("Ce fichier dépasse la taille maximale autorisée par fichier.");
+    }
+
+    const activeDocs = record.documents.filter((d) => d.active);
+    if (activeDocs.length >= FIXTURE_CONFIG.limits.max_active_files) {
+      throw fileLimit("Nombre maximal de fichiers atteint pour ce dossier.");
+    }
+    const usedBytes = activeDocs.reduce((sum, d) => sum + d.size_bytes, 0);
+    if (usedBytes + file.size > FIXTURE_CONFIG.limits.max_case_bytes) {
+      throw fileLimit("Ce dossier dépasserait la taille totale autorisée.");
     }
 
     const document: DocumentRecord = {
       document_id: this.store.nextId("DOC"),
       filename: file.name,
       document_type: null,
+      // ponytail: the fixture never runs real page extraction, so a fresh
+      // upload's page count stays unknown (null) rather than simulated.
       pages: null,
       uploaded_at: new Date().toISOString(),
       state: "uploaded",
       error: null,
       active: true,
+      size_bytes: file.size,
     };
     record.documents.push(document);
     record.revision += 1;
@@ -272,14 +318,24 @@ export class FixtureCaseApi implements CaseApi {
   }
 
   async getDocumentPage(documentId: string, page: number): Promise<DocumentPage> {
-    return {
-      document_id: documentId,
-      page,
-      image_url: null,
-      source_text: "Aperçu non disponible en mode démonstration.",
-      method: null,
-      quality: null,
-    };
+    const user = this.requireAuth();
+    for (const record of this.store.cases.values()) {
+      if (record.owner_id !== user.id) continue;
+      const doc = record.documents.find((d) => d.document_id === documentId);
+      if (!doc) continue;
+      if (doc.pages !== null && (page < 1 || page > doc.pages)) throw notFound();
+      const seeded = DEMO_DOCUMENT_PAGES[documentId]?.find((p) => p.page === page);
+      if (seeded) return structuredClone(seeded);
+      return {
+        document_id: documentId,
+        page,
+        image_url: null,
+        source_text: "Aperçu non disponible pour ce document en mode démonstration.",
+        method: null,
+        quality: null,
+      };
+    }
+    throw notFound();
   }
 
   async startAnalysis(
