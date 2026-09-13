@@ -6,6 +6,7 @@ import {
   CHECK_RESULT_LABEL,
   CHECK_RESULT_TONE,
   FINDING_DELTA_LABEL,
+  FINDING_DELTA_TONE,
   FINDING_STATUS_LABEL,
   FINDING_STATUS_TONE,
 } from "../lib/findingLabels";
@@ -67,7 +68,7 @@ export function FindingCard({
           {finding.finding_status && (
             <Badge tone={FINDING_STATUS_TONE[finding.finding_status]}>{FINDING_STATUS_LABEL[finding.finding_status]}</Badge>
           )}
-          {finding.delta && <Badge tone="info">{FINDING_DELTA_LABEL[finding.delta]}</Badge>}
+          {finding.delta && <Badge tone={FINDING_DELTA_TONE[finding.delta]}>{FINDING_DELTA_LABEL[finding.delta]}</Badge>}
         </div>
       </div>
 

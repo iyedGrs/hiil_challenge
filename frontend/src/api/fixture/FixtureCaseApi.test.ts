@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../ApiError";
 import { FIXTURE_DEMO_PASSWORD, FIXTURE_USERS } from "./seed";
 import { FixtureCaseApi } from "./FixtureCaseApi";
@@ -215,6 +215,69 @@ describe("FixtureCaseApi", () => {
     it("returns the seeded Arabic page text unchanged", async () => {
       const page = await api.getDocumentPage("DOC_005", 1);
       expect(page.source_text).toContain("نطالب");
+    });
+  });
+
+  describe("analysis jobs (UI-06)", () => {
+    const CASE_ID = "CASE_001"; // seeded demo case, revision 1, 1 published analysis
+
+    beforeEach(async () => {
+      vi.useFakeTimers();
+      await api.login("amina.preparer@example.tn", FIXTURE_DEMO_PASSWORD);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("advances a started job through the running phases before succeeding", async () => {
+      const started = await api.startAnalysis(CASE_ID, 1, "idem-phases");
+      expect((await api.getJob(started.job_id)).status).toBe("queued");
+
+      await vi.advanceTimersByTimeAsync(400);
+      let job = await api.getJob(started.job_id);
+      expect(job.status).toBe("running");
+      expect(job.phase).toBe("reading");
+
+      await vi.advanceTimersByTimeAsync(400 * 6);
+      job = await api.getJob(started.job_id);
+      expect(job.status).toBe("succeeded");
+      expect(job.result_analysis_id).toBeTruthy();
+    });
+
+    it("resolves the missing-delivery-evidence finding once evidence is added, keeps others still_open, and introduces one new finding on the second run (P6)", async () => {
+      const responded = await api.respondToFinding("finding_delivery_invoice_0001", 1, "add_evidence", null, ["DOC_001"]);
+
+      const started = await api.startAnalysis(CASE_ID, responded.revision, "idem-reassess");
+      await vi.advanceTimersByTimeAsync(400 * 7);
+      const job = await api.getJob(started.job_id);
+      const analysis = await api.getAnalysis(job.result_analysis_id!);
+
+      const delivery = analysis.checks.find((c) => c.finding_id === "finding_delivery_invoice_0001")!;
+      expect(delivery.finding_status).toBe("resolved");
+      expect(delivery.delta).toBe("resolved");
+
+      const amount = analysis.checks.find((c) => c.finding_id === "finding_amount_reconciliation_0001")!;
+      expect(amount.finding_status).toBe("open");
+      expect(amount.delta).toBe("still_open");
+
+      const newFinding = analysis.checks.find((c) => c.finding_id === "finding_payment_due_status_0001");
+      expect(newFinding?.delta).toBe("new");
+    });
+
+    it("marks a still-active job superseded when a new analysis is started for the same case", async () => {
+      const first = await api.startAnalysis(CASE_ID, 1, "idem-first");
+      await vi.advanceTimersByTimeAsync(400); // first job now running, not yet succeeded
+
+      const second = await api.startAnalysis(CASE_ID, 1, "idem-second");
+      expect(second.job_id).not.toBe(first.job_id);
+      expect((await api.getJob(first.job_id)).status).toBe("superseded");
+    });
+
+    it("returns the same job for a retried idempotency key instead of starting a duplicate", async () => {
+      const first = await api.startAnalysis(CASE_ID, 1, "idem-retry");
+      const retried = await api.startAnalysis(CASE_ID, 1, "idem-retry");
+      expect(retried.job_id).toBe(first.job_id);
     });
   });
 });

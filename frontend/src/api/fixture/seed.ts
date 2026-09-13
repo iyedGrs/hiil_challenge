@@ -293,6 +293,39 @@ export const DEMO_CASE_CHECK_AMOUNT_DISCREPANCY: CheckFinding = {
   actions: ["correct_claim", "disagree"],
 };
 
+/** Fresh clones of every baseline finding seeded for a case's very first published analysis. */
+export function buildBaselineChecks(): CheckFinding[] {
+  return [
+    structuredClone(DEMO_CASE_CHECK),
+    structuredClone(DEMO_CASE_CHECK_SATISFIED),
+    structuredClone(DEMO_CASE_CHECK_UNREADABLE),
+    structuredClone(DEMO_CASE_CHECK_NOT_APPLICABLE),
+    structuredClone(DEMO_CASE_CHECK_AMOUNT_DISCREPANCY),
+  ];
+}
+
+/**
+ * UI-06: a check that only appears once a case is reassessed for the second
+ * time, so the P6 demo can show the `new` delta appearing on a later run
+ * rather than only on the very first published analysis.
+ */
+export const DEMO_CASE_CHECK_PAYMENT_DUE: CheckFinding = {
+  check_id: "payment_due_status",
+  subject_id: "invoice_0001",
+  subject_label: "Échéance de paiement — facture n° 0001",
+  finding_id: "finding_payment_due_status_0001",
+  result: "unassessable",
+  reason_code: "PARTIAL_COVERAGE",
+  finding_status: "open",
+  delta: "new",
+  basis: "checklist",
+  message: "L'échéance de paiement n'a pas pu être confirmée avec les pièces examinées jusqu'ici.",
+  evidence_refs: [],
+  reviewed_document_ids: [],
+  legal_reference_ids: [],
+  actions: ["add_evidence", "explain_unavailable", "disagree"],
+};
+
 /** P6: backend calculates a 15,000 TND documented balance against the 20,000 TND claim. */
 export const DEMO_CASE_RECONCILIATION = {
   documented_balance: "15000.000",

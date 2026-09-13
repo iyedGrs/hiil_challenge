@@ -7,6 +7,7 @@ import type {
   AuthUser,
   CaseDetail,
   CaseSummary,
+  CheckFinding,
   Claim,
   DocumentPage,
   DocumentRecord,
@@ -14,6 +15,7 @@ import type {
   FindingResponse,
   Intake,
   Job,
+  JobPhase,
   ListResponse,
   Recipient,
   ReviewEvent,
@@ -22,8 +24,23 @@ import type {
   ReviewerSubmissionSummary,
   Submission,
 } from "../types";
-import { DEMO_DOCUMENT_PAGES, FIXTURE_CONFIG, FIXTURE_RECIPIENTS, FIXTURE_USERS } from "./seed";
+import {
+  DEMO_CASE_CHECK,
+  DEMO_CASE_CHECK_PAYMENT_DUE,
+  DEMO_DOCUMENT_PAGES,
+  FIXTURE_CONFIG,
+  FIXTURE_RECIPIENTS,
+  FIXTURE_USERS,
+  buildBaselineChecks,
+} from "./seed";
 import { createFixtureStore, type FixtureStore, type StoredCase } from "./store";
+
+/** Running phases in exact order per spec/backend.md B9. */
+const JOB_PHASES: JobPhase[] = ["reading", "extracting", "validating_facts", "checking", "validating_checks", "publishing"];
+
+// ponytail: fixed simulated per-phase delay so the demo (and fake-timer
+// tests) advance predictably; a real job's timing is server-controlled.
+const PHASE_DURATION_MS = 400;
 
 function unauthenticated(): ApiError {
   return new ApiError(401, {
@@ -154,6 +171,8 @@ function toCaseDetail(c: StoredCase): CaseDetail {
  */
 export class FixtureCaseApi implements CaseApi {
   private readonly store: FixtureStore = createFixtureStore();
+  private readonly cancelledJobIds = new Set<string>();
+  private readonly idempotencyResponses = new Map<string, { job_id: string; case_id: string; revision: number }>();
 
   private requireAuth(): AuthUser {
     const user = FIXTURE_USERS.find((u) => u.id === this.store.currentUserId);
@@ -342,42 +361,130 @@ export class FixtureCaseApi implements CaseApi {
   async startAnalysis(
     caseId: string,
     expectedRevision: number,
-    _idempotencyKey: string,
+    idempotencyKey: string,
   ): Promise<{ job_id: string; case_id: string; revision: number }> {
     const record = this.requireCase(caseId);
     this.requireRevision(record, expectedRevision);
     if (record.intake.status !== "ready") throw intakeNotReady(record.intake);
 
-    const existing = record.analyses.at(-1);
-    let analysis: Analysis;
-    if (existing) {
-      analysis = existing;
-    } else {
-      analysis = {
-        analysis_id: this.store.nextId("RUN"),
-        case_id: record.case_id,
-        revision: record.revision,
-        status: "ready",
-        execution_mode: "fixture",
-        checklist_version: "tn-goods-v1",
-        legal_coverage: FIXTURE_CONFIG.legal_coverage[record.claim.case_type] ?? "unvalidated",
-        coverage: { reviewed_pages: 0, unreadable_pages: 0, rejected_facts: 0 },
-        checks: [],
-        reconciliation: null,
-      };
-      record.analyses.push(analysis);
+    const cached = this.idempotencyResponses.get(idempotencyKey);
+    if (cached) return cached;
+
+    // B8: "Enforce one active assessment per case" — a new request supersedes
+    // whatever is still running rather than queueing behind it (frontend.md
+    // F4 job state `superseded`).
+    const activeJob = record.jobs.find((j) => j.status === "queued" || j.status === "running");
+    if (activeJob) {
+      this.cancelledJobIds.add(activeJob.id);
+      activeJob.status = "superseded";
     }
 
     const job: Job = {
       id: this.store.nextId("JOB"),
-      status: "succeeded",
-      phase: "publishing",
+      status: "queued",
+      phase: null,
       error: null,
-      result_analysis_id: analysis.analysis_id,
+      result_analysis_id: null,
       result_export_id: null,
     };
     record.jobs.push(job);
-    return { job_id: job.id, case_id: record.case_id, revision: record.revision };
+    const response = { job_id: job.id, case_id: record.case_id, revision: record.revision };
+    this.idempotencyResponses.set(idempotencyKey, response);
+    this.runAnalysisJob(record, job);
+    return response;
+  }
+
+  /** Simulates a real job advancing through B9's exact running phases on a timer, so the dev demo shows honest polling. */
+  private runAnalysisJob(record: StoredCase, job: Job): void {
+    let phaseIndex = 0;
+    const advance = (): void => {
+      if (this.cancelledJobIds.has(job.id)) return;
+      if (phaseIndex < JOB_PHASES.length) {
+        job.status = "running";
+        job.phase = JOB_PHASES[phaseIndex];
+        phaseIndex += 1;
+        setTimeout(advance, PHASE_DURATION_MS);
+        return;
+      }
+      const analysis = this.publishReassessment(record);
+      job.status = "succeeded";
+      job.phase = "publishing";
+      job.result_analysis_id = analysis.analysis_id;
+    };
+    setTimeout(advance, PHASE_DURATION_MS);
+  }
+
+  /** Builds and publishes the next analysis, preserving finding identity across reassessment (FE-06). */
+  private publishReassessment(record: StoredCase): Analysis {
+    const previous = record.analyses.at(-1);
+    const isSecondRun = record.analyses.length === 1;
+    const checks = previous ? this.reassessChecks(previous.checks, record.responses, isSecondRun) : buildBaselineChecks();
+
+    const analysis: Analysis = {
+      analysis_id: this.store.nextId("RUN"),
+      case_id: record.case_id,
+      revision: record.revision,
+      status: "ready",
+      execution_mode: "fixture",
+      checklist_version: "tn-goods-v1",
+      legal_coverage: FIXTURE_CONFIG.legal_coverage[record.claim.case_type] ?? "unvalidated",
+      coverage: {
+        reviewed_pages: previous?.coverage.reviewed_pages ?? 5,
+        unreadable_pages: previous?.coverage.unreadable_pages ?? 1,
+        rejected_facts: previous?.coverage.rejected_facts ?? 1,
+      },
+      checks,
+      reconciliation: previous?.reconciliation ?? null,
+    };
+    record.analyses.push(analysis);
+    record.activity.push({
+      id: this.store.nextId("activity"),
+      type: "analysis_published",
+      message: previous ? "Réévaluation publiée." : "Analyse initiale publiée.",
+      created_at: new Date().toISOString(),
+    });
+    return analysis;
+  }
+
+  /**
+   * P6 demo: the missing-delivery-evidence finding resolves once the
+   * preparer has responded with `add_evidence`; every other still-open
+   * finding stays `still_open`; a new check appears once, on the second run,
+   * to demonstrate the `new` delta after reassessment (finding identity is
+   * preserved throughout via the unchanged `finding_id`s, FE-06).
+   */
+  private reassessChecks(
+    previous: CheckFinding[],
+    responses: Record<string, FindingResponse>,
+    isSecondRun: boolean,
+  ): CheckFinding[] {
+    const next = previous.map((check) => structuredClone(check));
+    for (const check of next) {
+      if (check.finding_status === null) continue; // code-owned not_applicable: unchanged
+      const responded = responses[check.finding_id];
+      if (
+        check.finding_id === DEMO_CASE_CHECK.finding_id &&
+        responded?.action === "add_evidence" &&
+        responded.document_ids.length > 0
+      ) {
+        check.result = "satisfied";
+        check.finding_status = "resolved";
+        check.delta = "resolved";
+        check.reason_code = "EVIDENCE_FOUND";
+        check.message = "Preuve de livraison versée au dossier et validée.";
+        check.reviewed_document_ids = [...new Set([...check.reviewed_document_ids, ...responded.document_ids])];
+        check.evidence_refs = responded.document_ids.map((documentId, index) => ({
+          fact_id: `fact_delivery_evidence_${index}`,
+          document_id: documentId,
+          page: 1,
+          source_text: "Pièce de livraison ajoutée par le préparateur.",
+        }));
+        continue;
+      }
+      check.delta = check.finding_status === "open" ? "still_open" : null;
+    }
+    if (isSecondRun) next.push(structuredClone(DEMO_CASE_CHECK_PAYMENT_DUE));
+    return next;
   }
 
   async getJob(jobId: string): Promise<Job> {
