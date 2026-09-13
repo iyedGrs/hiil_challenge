@@ -47,6 +47,14 @@ export const FINDING_DELTA_LABEL: Record<NonNullable<FindingDelta>, string> = {
   not_applicable: "Non applicable",
 };
 
+export const FINDING_DELTA_TONE: Record<NonNullable<FindingDelta>, BadgeTone> = {
+  new: "info",
+  resolved: "success",
+  still_open: "muted",
+  reopened: "warning",
+  not_applicable: "muted",
+};
+
 export const FINDING_ACTION_LABEL: Record<FindingAction, string> = {
   add_evidence: "Ajouter une pièce",
   correct_claim: "Corriger la réclamation",

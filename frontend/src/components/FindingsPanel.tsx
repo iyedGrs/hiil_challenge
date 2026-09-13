@@ -1,18 +1,25 @@
-import { useId, useMemo, useState } from "react";
-import type { Analysis, CaseDetail, CheckResult, FindingResponse, Job } from "../api/types";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { caseApi } from "../api";
+import { ApiError } from "../api/ApiError";
+import type { Analysis, CaseDetail, CheckResult, FindingDelta, FindingResponse, Job } from "../api/types";
 import { Badge } from "./Badge";
+import { Button } from "./Button";
 import { FindingCard } from "./FindingCard";
+import { JobProgress } from "./JobProgress";
+import { useJobPolling } from "../lib/useJobPolling";
 import {
   ANALYSIS_STATUS_LABEL,
   ANALYSIS_STATUS_TONE,
   CHECK_RESULT_LABEL,
   EXECUTION_MODE_LABEL,
+  FINDING_DELTA_LABEL,
   LEGAL_COVERAGE_LABEL,
   LEGAL_COVERAGE_TONE,
 } from "../lib/findingLabels";
 
 const RESULT_FILTER_OPTIONS: Array<CheckResult | "all"> = ["all", "satisfied", "contradicted", "unassessable", "not_applicable"];
 const STATUS_FILTER_OPTIONS: Array<"all" | "open" | "resolved"> = ["all", "open", "resolved"];
+const DELTA_SUMMARY_ORDER: Array<NonNullable<FindingDelta>> = ["new", "resolved", "still_open", "reopened", "not_applicable"];
 
 interface FindingsPanelProps {
   detail: CaseDetail;
@@ -23,9 +30,6 @@ interface FindingsPanelProps {
 
 function jobMessage(job: Job | null): string {
   if (!job) return "Aucune analyse n'a encore été exécutée pour ce dossier.";
-  if (job.status === "queued" || job.status === "running") {
-    return "Une analyse est en cours de traitement. Revenez sur cet onglet une fois terminée.";
-  }
   if (job.status === "failed") {
     return job.error
       ? `La dernière tentative d'analyse a échoué : ${job.error}`
@@ -41,17 +45,117 @@ export function FindingsPanel({ detail, onUpdate, onReload, onOpenDocumentPage }
   const [resultFilter, setResultFilter] = useState<CheckResult | "all">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "resolved">("all");
 
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [failedJob, setFailedJob] = useState<Job | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const idempotencyKeyRef = useRef<string | null>(null);
+
+  // UI-06: reopening a case whose latest job is still active resumes polling
+  // automatically; also picks up a fresher job after this tab's own job was
+  // superseded (frontend.md F4 "Reopening the case restores the active job").
+  useEffect(() => {
+    const job = detail.latest_job;
+    if (job && (job.status === "queued" || job.status === "running") && job.id !== activeJobId) {
+      setActiveJobId(job.id);
+      setFailedJob(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resync only when the case's own latest_job changes
+  }, [detail.latest_job]);
+
+  const polling = useJobPolling({
+    jobId: activeJobId,
+    onSucceeded: () => {
+      setActiveJobId(null);
+      setFailedJob(null);
+      onReload();
+    },
+    onFailed: (job) => {
+      setActiveJobId(null);
+      setFailedJob(job);
+    },
+    onSuperseded: () => {
+      setActiveJobId(null);
+      onReload();
+    },
+  });
+
+  async function handleStart(): Promise<void> {
+    setStartError(null);
+    setStarting(true);
+    const idempotencyKey = idempotencyKeyRef.current ?? crypto.randomUUID();
+    idempotencyKeyRef.current = idempotencyKey;
+    try {
+      const result = await caseApi.startAnalysis(detail.case_id, detail.revision, idempotencyKey);
+      idempotencyKeyRef.current = null;
+      setFailedJob(null);
+      setActiveJobId(result.job_id);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "REVISION_CONFLICT") {
+        idempotencyKeyRef.current = null;
+        onReload();
+      } else {
+        // Idempotency key is kept so a retry of this same click reuses it.
+        setStartError(err instanceof ApiError ? err.message : "Impossible de lancer l'analyse. Réessayez.");
+      }
+    } finally {
+      setStarting(false);
+    }
+  }
+
   const analysis: Analysis | null = detail.latest_analysis;
+  const isJobActive = activeJobId !== null;
   const responseByFindingId = useMemo(() => {
     const map = new Map<string, FindingResponse>();
     for (const response of detail.responses) map.set(response.finding_id, response);
     return map;
   }, [detail.responses]);
 
+  const deltaSummary = useMemo(() => {
+    if (!analysis) return null;
+    const counts = new Map<FindingDelta, number>();
+    for (const check of analysis.checks) {
+      if (!check.delta) continue;
+      counts.set(check.delta, (counts.get(check.delta) ?? 0) + 1);
+    }
+    return counts.size > 0 ? counts : null;
+  }, [analysis]);
+
+  const runControls = (
+    <>
+      {isJobActive && polling.job && (
+        <JobProgress job={polling.job} stillProcessing={polling.stillProcessing} transientError={polling.transientError} />
+      )}
+      {failedJob && !isJobActive && (
+        <div role="alert" className="rounded-md border border-danger bg-danger-bg p-4 text-sm text-danger">
+          <p>{failedJob.error ?? "La dernière tentative d'analyse a échoué."}</p>
+          <Button variant="secondary" className="mt-2" onClick={() => void handleStart()} disabled={starting}>
+            Réessayer l'analyse
+          </Button>
+        </div>
+      )}
+      {startError && (
+        <p role="alert" className="rounded-sm bg-danger-bg px-3 py-2 text-sm text-danger">
+          {startError}
+        </p>
+      )}
+    </>
+  );
+
   if (!analysis) {
     return (
-      <div className="rounded-md border border-dashed border-border p-6 text-sm text-text-muted">
-        {jobMessage(detail.latest_job)}
+      <div className="flex flex-col gap-4">
+        {runControls}
+        {!isJobActive && !failedJob && (
+          <div className="rounded-md border border-dashed border-border p-6 text-sm text-text-muted">
+            <p>{jobMessage(detail.latest_job)}</p>
+            <div className="mt-3">
+              <Button onClick={() => void handleStart()} disabled={starting}>
+                Lancer l'analyse
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -69,6 +173,7 @@ export function FindingsPanel({ detail, onUpdate, onReload, onOpenDocumentPage }
 
   return (
     <div className="flex flex-col gap-6">
+      {runControls}
       {isOutdated && (
         <p role="alert" className="rounded-sm bg-danger-bg px-3 py-2 text-sm text-danger">
           Cette analyse porte sur une révision antérieure du dossier (analyse {analysis.revision} / dossier{" "}
@@ -127,6 +232,27 @@ export function FindingsPanel({ detail, onUpdate, onReload, onOpenDocumentPage }
           </div>
         )}
       </div>
+
+      {deltaSummary && (
+        <div className="rounded-md border border-border bg-surface-muted p-3 text-sm text-text-muted">
+          <h3 className="text-xs font-medium text-text-subtle">Changements depuis la dernière analyse</h3>
+          <div className="mt-1 flex flex-wrap gap-3">
+            {DELTA_SUMMARY_ORDER.filter((delta) => deltaSummary.has(delta)).map((delta) => (
+              <span key={delta}>
+                {FINDING_DELTA_LABEL[delta]} : <span className="tabular">{deltaSummary.get(delta)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!isJobActive && (
+        <div className="flex justify-end">
+          <Button variant="secondary" onClick={() => void handleStart()} disabled={starting}>
+            Relancer l'analyse
+          </Button>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-4">
         <div>

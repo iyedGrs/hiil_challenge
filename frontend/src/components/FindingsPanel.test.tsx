@@ -1,12 +1,29 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import type { CaseDetail } from "../api/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CaseDetail, Job } from "../api/types";
+import { STILL_PROCESSING_THRESHOLD_MS } from "../lib/useJobPolling";
 import { FindingsPanel } from "./FindingsPanel";
 
 vi.mock("../api", () => ({
-  caseApi: { respondToFinding: vi.fn() },
+  caseApi: { respondToFinding: vi.fn(), startAnalysis: vi.fn(), getJob: vi.fn() },
 }));
+
+// eslint-disable-next-line import/order -- import after the mock so the mock is applied
+import { caseApi } from "../api";
+
+function runningJob(overrides: Partial<Job> = {}): Job {
+  return { id: "JOB_001", status: "running", phase: "reading", error: null, result_analysis_id: null, result_export_id: null, ...overrides };
+}
+
+/** Advances fake timers inside `act`, flushing the resulting getJob() promise and state update. */
+async function advance(ms: number): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
 
 function baseDetail(overrides: Partial<CaseDetail> = {}): CaseDetail {
   return {
@@ -35,12 +52,17 @@ function baseDetail(overrides: Partial<CaseDetail> = {}): CaseDetail {
 }
 
 describe("FindingsPanel", () => {
-  it("shows an honest empty state without a run button when no analysis has ever been published", () => {
+  beforeEach(() => {
+    vi.mocked(caseApi.startAnalysis).mockReset();
+    vi.mocked(caseApi.getJob).mockReset();
+  });
+
+  it("shows an honest empty state with a run trigger when no analysis has ever been published (UI-06)", () => {
     render(
       <FindingsPanel detail={baseDetail()} onUpdate={vi.fn()} onReload={vi.fn()} onOpenDocumentPage={vi.fn()} />,
     );
     expect(screen.getByText(/Aucune analyse n'a encore été exécutée/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /lancer|démarrer/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Lancer l'analyse" })).toBeInTheDocument();
   });
 
   it("renders coverage counts, reconciliation as raw backend strings, and never a completeness percentage", () => {
@@ -151,5 +173,116 @@ describe("FindingsPanel", () => {
 
     expect(screen.queryByText("Constat satisfait")).not.toBeInTheDocument();
     expect(screen.getByText("Constat contredit")).toBeInTheDocument();
+  });
+
+  it("shows a per-delta change-summary count alongside each finding's own delta badge", () => {
+    const detail = baseDetail({
+      latest_analysis: {
+        analysis_id: "RUN_002",
+        case_id: "CASE_001",
+        revision: 1,
+        status: "ready",
+        execution_mode: "fixture",
+        checklist_version: "tn-goods-v1",
+        legal_coverage: "unvalidated",
+        coverage: { reviewed_pages: 1, unreadable_pages: 0, rejected_facts: 0 },
+        checks: [
+          {
+            check_id: "a",
+            subject_id: "s1",
+            subject_label: "Preuve de livraison",
+            finding_id: "finding_a",
+            result: "satisfied",
+            reason_code: "EVIDENCE_FOUND",
+            finding_status: "resolved",
+            delta: "resolved",
+            basis: "checklist",
+            message: "OK",
+            evidence_refs: [],
+            reviewed_document_ids: [],
+            legal_reference_ids: [],
+            actions: [],
+          },
+          {
+            check_id: "b",
+            subject_id: "s2",
+            subject_label: "Cohérence du montant",
+            finding_id: "finding_b",
+            result: "contradicted",
+            reason_code: "CONFLICT",
+            finding_status: "open",
+            delta: "still_open",
+            basis: "deterministic",
+            message: "Écart détecté.",
+            evidence_refs: [],
+            reviewed_document_ids: [],
+            legal_reference_ids: [],
+            actions: ["disagree"],
+          },
+        ],
+        reconciliation: null,
+      },
+    });
+    render(<FindingsPanel detail={detail} onUpdate={vi.fn()} onReload={vi.fn()} onOpenDocumentPage={vi.fn()} />);
+
+    expect(screen.getByText("Changements depuis la dernière analyse")).toBeInTheDocument();
+    // Each finding keeps its own delta badge — never swapped between findings by position (FE-06).
+    const deliveryCard = screen.getByText("Preuve de livraison").closest("li")!;
+    expect(within(deliveryCard).getByText("Résolu depuis la dernière analyse")).toBeInTheDocument();
+    const amountCard = screen.getByText("Cohérence du montant").closest("li")!;
+    expect(within(amountCard).getByText("Toujours ouvert")).toBeInTheDocument();
+  });
+
+  describe("job polling (UI-06)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("starts an analysis from the empty state and shows the running phases", async () => {
+      vi.mocked(caseApi.startAnalysis).mockResolvedValueOnce({ job_id: "JOB_001", case_id: "CASE_001", revision: 1 });
+      vi.mocked(caseApi.getJob).mockResolvedValue(runningJob({ phase: "extracting" }));
+
+      render(<FindingsPanel detail={baseDetail()} onUpdate={vi.fn()} onReload={vi.fn()} onOpenDocumentPage={vi.fn()} />);
+
+      // fireEvent (not userEvent) here: userEvent's own internal delays use
+      // real timers even under `vi.useFakeTimers()`, which this test needs
+      // for the subsequent phase/threshold assertions.
+      fireEvent.click(screen.getByRole("button", { name: "Lancer l'analyse" }));
+      await advance(0); // flush startAnalysis + the first getJob() poll
+
+      expect(caseApi.startAnalysis).toHaveBeenCalledWith("CASE_001", 1, expect.any(String));
+      expect(screen.getByRole("status")).toHaveTextContent(/Extraction des données/);
+      // No double submit while a job is active: the trigger disappears.
+      expect(screen.queryByRole("button", { name: "Lancer l'analyse" })).not.toBeInTheDocument();
+    });
+
+    it("resumes polling automatically when the case is reopened with an active job (frontend.md F4)", async () => {
+      vi.mocked(caseApi.getJob).mockResolvedValue(runningJob());
+      const detail = baseDetail({ latest_job: runningJob() });
+
+      render(<FindingsPanel detail={detail} onUpdate={vi.fn()} onReload={vi.fn()} onOpenDocumentPage={vi.fn()} />);
+      await advance(0);
+
+      expect(caseApi.getJob).toHaveBeenCalledWith("JOB_001");
+      expect(screen.getByRole("status")).toHaveTextContent(/Analyse en cours/);
+    });
+
+    it("shows 'Toujours en cours de traitement' past the wait threshold without ever claiming a failure", async () => {
+      vi.mocked(caseApi.getJob).mockResolvedValue(runningJob());
+      const detail = baseDetail({ latest_job: runningJob() });
+
+      render(<FindingsPanel detail={detail} onUpdate={vi.fn()} onReload={vi.fn()} onOpenDocumentPage={vi.fn()} />);
+      await advance(0);
+      expect(caseApi.getJob).toHaveBeenCalledTimes(1);
+
+      await advance(STILL_PROCESSING_THRESHOLD_MS + 5_000);
+
+      expect(screen.getByText("Toujours en cours de traitement…")).toBeInTheDocument();
+      expect(screen.queryByText(/a échoué/)).not.toBeInTheDocument();
+    });
   });
 });
