@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { caseApi } from "../api";
 import { ApiError } from "../api/ApiError";
-import type { CaseDetail, Claim, DocumentRecord } from "../api/types";
+import type { CaseDetail, Claim, DocumentRecord, FindingResponse } from "../api/types";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { DocumentWorkspace } from "../components/DocumentWorkspace";
+import { FindingsPanel } from "../components/FindingsPanel";
 import { IntakeForm, type IntakeFormResult } from "../components/IntakeForm";
 import { Tabs } from "../components/Tabs";
 import { useSession } from "../session/SessionContext";
@@ -96,6 +97,25 @@ export function CaseDetailPage() {
       const next = new URLSearchParams(prev);
       next.set("page", String(page));
       return next;
+    });
+  }
+
+  /** Citation deep link from a finding card into the Documents tab (frontend.md FE-05). */
+  function openDocumentPage(documentId: string, page: number): void {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", "documents");
+      next.set("doc", documentId);
+      next.set("page", String(page));
+      return next;
+    });
+  }
+
+  function handleFindingResponse(revision: number, response: FindingResponse): void {
+    setState((prev) => {
+      if (prev.status !== "loaded") return prev;
+      const responses = [...prev.detail.responses.filter((r) => r.finding_id !== response.finding_id), response];
+      return { status: "loaded", detail: { ...prev.detail, revision, responses } };
     });
   }
 
@@ -214,6 +234,13 @@ export function CaseDetailPage() {
                     selectedPage={Number(searchParams.get("page") ?? "1") || 1}
                     onSelectDocument={selectDocument}
                     onSelectPage={selectPage}
+                  />
+                ) : tab.id === "checks" && caseId ? (
+                  <FindingsPanel
+                    detail={detail}
+                    onUpdate={handleFindingResponse}
+                    onReload={load}
+                    onOpenDocumentPage={openDocumentPage}
                   />
                 ) : (
                   <p className="text-sm text-text-muted">Cette section sera construite dans une prochaine étape.</p>

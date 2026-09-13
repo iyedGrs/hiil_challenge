@@ -9,7 +9,16 @@ import type {
   ReviewEvent,
   SubmissionSummary,
 } from "../types";
-import { DEMO_CASE_CHECK, DEMO_CASE_CLAIM, DEMO_CASE_DOCUMENTS } from "./seed";
+import {
+  DEMO_CASE_CHECK,
+  DEMO_CASE_CHECK_AMOUNT_DISCREPANCY,
+  DEMO_CASE_CHECK_NOT_APPLICABLE,
+  DEMO_CASE_CHECK_SATISFIED,
+  DEMO_CASE_CHECK_UNREADABLE,
+  DEMO_CASE_CLAIM,
+  DEMO_CASE_DOCUMENTS,
+  DEMO_CASE_RECONCILIATION,
+} from "./seed";
 
 export interface StoredCase {
   case_id: string;
@@ -64,9 +73,15 @@ export function createFixtureStore(): FixtureStore {
     execution_mode: "fixture",
     checklist_version: "tn-goods-v1",
     legal_coverage: "unvalidated",
-    coverage: { reviewed_pages: 3, unreadable_pages: 0, rejected_facts: 0 },
-    checks: [DEMO_CASE_CHECK],
-    reconciliation: null,
+    coverage: { reviewed_pages: 5, unreadable_pages: 1, rejected_facts: 1 },
+    checks: [
+      DEMO_CASE_CHECK,
+      DEMO_CASE_CHECK_SATISFIED,
+      DEMO_CASE_CHECK_UNREADABLE,
+      DEMO_CASE_CHECK_NOT_APPLICABLE,
+      DEMO_CASE_CHECK_AMOUNT_DISCREPANCY,
+    ],
+    reconciliation: DEMO_CASE_RECONCILIATION,
   };
 
   const demoJob: Job = {
