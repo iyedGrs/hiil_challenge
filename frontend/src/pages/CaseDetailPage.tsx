@@ -8,6 +8,7 @@ import { Button } from "../components/Button";
 import { DocumentWorkspace } from "../components/DocumentWorkspace";
 import { FindingsPanel } from "../components/FindingsPanel";
 import { IntakeForm, type IntakeFormResult } from "../components/IntakeForm";
+import { SubmissionPanel } from "../components/SubmissionPanel";
 import { Tabs } from "../components/Tabs";
 import { useSession } from "../session/SessionContext";
 import { INTAKE_STATUS_LABEL, INTAKE_STATUS_TONE } from "../lib/intakeStatus";
@@ -241,6 +242,15 @@ export function CaseDetailPage() {
                     onUpdate={handleFindingResponse}
                     onReload={load}
                     onOpenDocumentPage={openDocumentPage}
+                  />
+                ) : tab.id === "submission" && caseId ? (
+                  <SubmissionPanel
+                    caseId={caseId}
+                    detail={detail}
+                    onReload={load}
+                    onNavigateToChecks={() =>
+                      setSearchParams((prev) => new URLSearchParams({ ...Object.fromEntries(prev), tab: "checks" }))
+                    }
                   />
                 ) : (
                   <p className="text-sm text-text-muted">Cette section sera construite dans une prochaine étape.</p>
