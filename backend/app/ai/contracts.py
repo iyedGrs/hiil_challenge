@@ -40,7 +40,10 @@ PROMPT_VERSION = "p1"
 #: Bounds on free text coming back from a model. Short by design: explanations
 #: are meant to be a sentence of justification, not a narrative.
 MAX_SOURCE_TEXT = 600
-MAX_VALUE_TEXT = 120
+#: ``value_text`` must be anchored inside ``source_text``, so it can never be
+#: longer than the quote. A tighter cap made a sentence-shaped fact (e.g. a
+#: ``delivery_confirmation``) reject the whole extraction response.
+MAX_VALUE_TEXT = MAX_SOURCE_TEXT
 MAX_EXPLANATION = 400
 MAX_FACTS_PER_DOCUMENT = 60
 MAX_CHECKS_PER_RUN = 60

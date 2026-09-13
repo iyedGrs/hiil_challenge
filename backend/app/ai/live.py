@@ -54,7 +54,8 @@ DEFAULT_ENDPOINT: Final[str] = "https://api.openai.com/v1"
 
 #: Bounded per-request budget (B8 rate/cost controls).
 REQUEST_TIMEOUT_SECONDS: Final[float] = 90.0
-MAX_OUTPUT_TOKENS: Final[int] = 4_000
+#: Includes the model's internal reasoning tokens, so it must leave room for the JSON.
+MAX_OUTPUT_TOKENS: Final[int] = 16_000
 
 #: Delimiters around untrusted content. Chosen to be implausible in a real
 #: document so a document cannot close the block and escape into instructions.
@@ -179,9 +180,8 @@ class LiveAiAdapter:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            # Deterministic as far as the provider allows, and JSON-only.
-            "temperature": 0,
-            "max_tokens": MAX_OUTPUT_TOKENS,
+            # Reasoning models reject `max_tokens` and any non-default temperature.
+            "max_completion_tokens": MAX_OUTPUT_TOKENS,
             "response_format": {"type": "json_object"},
         }
         try:

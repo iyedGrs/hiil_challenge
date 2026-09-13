@@ -260,8 +260,8 @@ export function CaseDetailPage() {
         Mes dossiers
       </Link>
 
-      <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
+      <div className="mt-3 flex items-start justify-between gap-6">
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl leading-tight font-semibold text-text" dir="auto">
             {detail.claim.claimant_name} <span className="font-normal text-text-subtle">c.</span>{" "}
             {detail.claim.counterparty_name}
@@ -296,10 +296,6 @@ export function CaseDetailPage() {
             </Button>
           </div>
         </div>
-      </div>
-
-      <div className="mt-4">
-        <Badge tone={READINESS_TONE[detail.readiness.status]}>{READINESS_LABEL[detail.readiness.status]}</Badge>
       </div>
 
       {banner && (

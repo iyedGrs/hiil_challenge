@@ -522,3 +522,28 @@ def test_decimal_arithmetic_is_exact() -> None:
     assert outcome.payload is not None
     assert outcome.payload["documented_balance"] == "15000.000"
     assert outcome.result == CheckResult.contradicted
+
+
+def test_sentence_shaped_fact_does_not_reject_extraction() -> None:
+    """A long delivery confirmation must not fail the whole response (live regression)."""
+    from app.ai.contracts import ExtractionResponse
+
+    sentence = (
+        "Le destinataire confirme avoir reçu les 20 lecteurs BX-200 correspondant au bon de\n"
+        "commande BC-2026-041 et à la facture FAC-2026-118."
+    )
+    response = ExtractionResponse.model_validate(
+        {
+            "document_id": "DOC_1",
+            "facts": [
+                {
+                    "kind": "delivery_confirmation",
+                    "value_text": sentence,
+                    "document_id": "DOC_1",
+                    "page": 1,
+                    "source_text": sentence,
+                }
+            ],
+        }
+    )
+    assert response.facts[0].value_text == sentence
