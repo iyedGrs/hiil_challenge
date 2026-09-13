@@ -10,9 +10,9 @@ tracebacks, provider payloads or document content ever reach the job row
 (B8, B9, spec/local-dev.md L6).
 
 ``AI_MAX_CONCURRENCY`` caps how many jobs one worker process runs at a time; the
-default of 1 means one concurrent provider call (B8 rate/cost controls). This
-slice registers no handlers, so any claimed job fails with a clear sanitized
-error instead of silently succeeding.
+default of 1 means one concurrent provider call (B8 rate/cost controls). A job
+kind with no registered handler fails with a clear sanitized error instead of
+silently succeeding.
 """
 
 from __future__ import annotations
@@ -59,14 +59,26 @@ NO_HANDLER_CODE = "HANDLER_UNAVAILABLE"
 #: the loop owns the transaction boundary.
 JobHandler = Callable[[DbSession, Job], None]
 
-#: Populated by later slices (analysis pipeline, export packaging). Keeping the
-#: registry empty here means the foundation slice makes no provider calls.
+#: Handlers by job kind, populated by :func:`register_default_handlers`. A kind
+#: with no handler fails with a sanitized error rather than silently succeeding.
 HANDLERS: dict[JobKind, JobHandler] = {}
 
 
 def register_handler(kind: JobKind, handler: JobHandler) -> None:
     """Register the handler for ``kind``, replacing any existing entry."""
     HANDLERS[kind] = handler
+
+
+def register_default_handlers() -> None:
+    """Register every shipped job handler.
+
+    Imported inside the function so the pipeline (and therefore the AI adapter
+    module) is only loaded by a process that actually runs jobs. Idempotent, so
+    tests may call it freely.
+    """
+    from app.pipeline.analysis import handle_analysis_job
+
+    register_handler(JobKind.analysis, handle_analysis_job)
 
 
 def worker_identity() -> str:
@@ -163,9 +175,16 @@ def heartbeat(db: DbSession, job_id: str, owner: str) -> bool:
 
 
 def _release_success(db: DbSession, job_id: str, owner: str) -> None:
+    """Promote a still-running job to ``succeeded``.
+
+    The ``status == running`` guard matters: a handler may legitimately end a job
+    in a different terminal state -- an analysis whose case moved on sets
+    ``superseded`` itself (spec/backend.md B7) -- and that decision must not be
+    overwritten by the generic success path.
+    """
     db.execute(
         update(Job)
-        .where(Job.id == job_id, Job.lease_owner == owner)
+        .where(Job.id == job_id, Job.lease_owner == owner, Job.status == JobStatus.running)
         .values(
             status=JobStatus.succeeded,
             phase=None,
@@ -354,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     del argv  # no command-line options in this slice
+    register_default_handlers()
     Worker().run()
     return 0
 

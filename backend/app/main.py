@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import (
+    analyses as analysis_routes,
     auth,
     cases as case_routes,
     config as config_routes,
@@ -125,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=API_PREFIX)
     app.include_router(case_routes.router, prefix=API_PREFIX)
     app.include_router(document_routes.router, prefix=API_PREFIX)
+    app.include_router(analysis_routes.router, prefix=API_PREFIX)
 
     return app
 
