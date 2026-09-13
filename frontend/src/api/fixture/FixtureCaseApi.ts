@@ -7,6 +7,7 @@ import type {
   AuthUser,
   CaseDetail,
   CaseSummary,
+  CheckFinding,
   Claim,
   DocumentPage,
   DocumentRecord,
@@ -14,6 +15,7 @@ import type {
   FindingResponse,
   Intake,
   Job,
+  JobPhase,
   ListResponse,
   Recipient,
   ReviewEvent,
@@ -22,8 +24,24 @@ import type {
   ReviewerSubmissionSummary,
   Submission,
 } from "../types";
-import { FIXTURE_CONFIG, FIXTURE_RECIPIENTS, FIXTURE_USERS } from "./seed";
-import { createFixtureStore, type FixtureStore, type StoredCase } from "./store";
+import {
+  DEMO_CASE_CHECK,
+  DEMO_CASE_CHECK_PAYMENT_DUE,
+  DEMO_DOCUMENT_PAGES,
+  FIXTURE_CONFIG,
+  FIXTURE_RECIPIENTS,
+  FIXTURE_USERS,
+  RECIPIENT_REVIEWER_ASSIGNMENTS,
+  buildBaselineChecks,
+} from "./seed";
+import { createFixtureStore, type FixtureStore, type StoredCase, type StoredSubmission } from "./store";
+
+/** Running phases in exact order per spec/backend.md B9. */
+const JOB_PHASES: JobPhase[] = ["reading", "extracting", "validating_facts", "checking", "validating_checks", "publishing"];
+
+// ponytail: fixed simulated per-phase delay so the demo (and fake-timer
+// tests) advance predictably; a real job's timing is server-controlled.
+const PHASE_DURATION_MS = 400;
 
 function unauthenticated(): ApiError {
   return new ApiError(401, {
@@ -65,7 +83,29 @@ function toAuthUser(user: AuthUser): AuthUser {
   return { id, email, role, display_name };
 }
 
-/** Cheap deterministic gate — no model call, matching B3 for fixture mode. */
+/** B9/F3: PDF, JPEG and PNG only. */
+const ACCEPTED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+function unsupportedFile(): ApiError {
+  return new ApiError(415, {
+    error: { code: "UNSUPPORTED_FILE", message: "Format de fichier non pris en charge (PDF, JPEG ou PNG).", field_errors: [], retryable: false },
+  });
+}
+
+function fileLimit(message: string): ApiError {
+  return new ApiError(413, { error: { code: "FILE_LIMIT", message, field_errors: [], retryable: false } });
+}
+
+/** Matches a mention of the supplied goods/merchandise in French narrative text. */
+const GOODS_MENTION = /\bbiens?\b|\bmarchandises?\b|\bmatériel\b|\bfournitures?\b|\bproduits?\b/i;
+
+/**
+ * Cheap deterministic gate — no model call, matching B3 for fixture mode.
+ * Deterministic and consistent so the same claim always yields the same
+ * result: a narrative that never mentions the supplied goods stays
+ * `needs_information` until either the narrative is edited to mention them
+ * or the mapped follow-up question is answered (frontend.md F4/F5).
+ */
 function evaluateIntake(claim: Claim): Intake {
   const narrative = claim.narrative.trim();
   if (narrative.length < 30) {
@@ -80,6 +120,17 @@ function evaluateIntake(claim: Claim): Intake {
       ],
     };
   }
+
+  const answeredGoods = claim.follow_up_answers.some(
+    (a) => a.question_id === "describe_goods" && a.answer.trim().length > 0,
+  );
+  if (!GOODS_MENTION.test(narrative) && !answeredGoods) {
+    return {
+      status: "needs_information",
+      questions: [{ id: "describe_goods", field: "narrative", message: "Quels biens ont été fournis ?" }],
+    };
+  }
+
   return { status: "ready", questions: [] };
 }
 
@@ -110,6 +161,7 @@ function toCaseDetail(c: StoredCase): CaseDetail {
     latest_analysis: latestAnalysis ? structuredClone(latestAnalysis) : null,
     submissions: structuredClone(c.submissions),
     activity: structuredClone(c.activity),
+    responses: Object.values(c.responses).map((r) => structuredClone(r)),
   };
 }
 
@@ -120,6 +172,8 @@ function toCaseDetail(c: StoredCase): CaseDetail {
  */
 export class FixtureCaseApi implements CaseApi {
   private readonly store: FixtureStore = createFixtureStore();
+  private readonly cancelledJobIds = new Set<string>();
+  private readonly idempotencyResponses = new Map<string, { job_id: string; case_id: string; revision: number }>();
 
   private requireAuth(): AuthUser {
     const user = FIXTURE_USERS.find((u) => u.id === this.store.currentUserId);
@@ -136,6 +190,15 @@ export class FixtureCaseApi implements CaseApi {
 
   private requireRevision(record: StoredCase, expectedRevision: number): void {
     if (record.revision !== expectedRevision) throw revisionConflict();
+  }
+
+  /** Only the reviewer assigned to a submission's recipient may see or act on it (frontend.md "Reviewer back office"). */
+  private requireAssignedSubmission(submissionId: string): StoredSubmission {
+    const user = this.requireAuth();
+    if (user.role !== "reviewer") throw notFound();
+    const stored = this.store.submissions.get(submissionId);
+    if (!stored || RECIPIENT_REVIEWER_ASSIGNMENTS[stored.recipient_id] !== user.id) throw notFound();
+    return stored;
   }
 
   async getConfig(): Promise<AppConfig> {
@@ -231,26 +294,39 @@ export class FixtureCaseApi implements CaseApi {
     const record = this.requireCase(caseId);
     this.requireRevision(record, expectedRevision);
 
-    const existing = record.documents.find((d) => d.active && d.filename === file.name);
+    // Duplicate is identified by the server: same name and size among this
+    // case's active documents (B9: "exact duplicate upload"); no new revision.
+    const existing = record.documents.find((d) => d.active && d.filename === file.name && d.size_bytes === file.size);
     if (existing) {
       return { duplicate: true, document: structuredClone(existing), revision: record.revision };
     }
 
-    if (record.documents.filter((d) => d.active).length >= FIXTURE_CONFIG.limits.max_active_files) {
-      throw new ApiError(413, {
-        error: { code: "FILE_LIMIT", message: "Nombre maximal de fichiers atteint.", field_errors: [], retryable: false },
-      });
+    if (!ACCEPTED_MIME_TYPES.has(file.type)) throw unsupportedFile();
+    if (file.size > FIXTURE_CONFIG.limits.max_file_bytes) {
+      throw fileLimit("Ce fichier dépasse la taille maximale autorisée par fichier.");
+    }
+
+    const activeDocs = record.documents.filter((d) => d.active);
+    if (activeDocs.length >= FIXTURE_CONFIG.limits.max_active_files) {
+      throw fileLimit("Nombre maximal de fichiers atteint pour ce dossier.");
+    }
+    const usedBytes = activeDocs.reduce((sum, d) => sum + d.size_bytes, 0);
+    if (usedBytes + file.size > FIXTURE_CONFIG.limits.max_case_bytes) {
+      throw fileLimit("Ce dossier dépasserait la taille totale autorisée.");
     }
 
     const document: DocumentRecord = {
       document_id: this.store.nextId("DOC"),
       filename: file.name,
       document_type: null,
+      // ponytail: the fixture never runs real page extraction, so a fresh
+      // upload's page count stays unknown (null) rather than simulated.
       pages: null,
       uploaded_at: new Date().toISOString(),
       state: "uploaded",
       error: null,
       active: true,
+      size_bytes: file.size,
     };
     record.documents.push(document);
     record.revision += 1;
@@ -272,55 +348,169 @@ export class FixtureCaseApi implements CaseApi {
   }
 
   async getDocumentPage(documentId: string, page: number): Promise<DocumentPage> {
-    return {
-      document_id: documentId,
-      page,
-      image_url: null,
-      source_text: "Aperçu non disponible en mode démonstration.",
-      method: null,
-      quality: null,
-    };
+    const user = this.requireAuth();
+
+    function respond(pages: number | null): DocumentPage {
+      if (pages !== null && (page < 1 || page > pages)) throw notFound();
+      const seeded = DEMO_DOCUMENT_PAGES[documentId]?.find((p) => p.page === page);
+      if (seeded) return structuredClone(seeded);
+      return {
+        document_id: documentId,
+        page,
+        image_url: null,
+        source_text: "Aperçu non disponible pour ce document en mode démonstration.",
+        method: null,
+        quality: null,
+      };
+    }
+
+    if (user.role === "reviewer") {
+      // FE-09: a reviewer reads the pages frozen in an assigned submission's
+      // snapshot, never the case's current working documents.
+      for (const stored of this.store.submissions.values()) {
+        if (RECIPIENT_REVIEWER_ASSIGNMENTS[stored.recipient_id] !== user.id) continue;
+        const doc = stored.snapshot.documents.find((d) => d.document_id === documentId);
+        if (doc) return respond(doc.pages);
+      }
+      throw notFound();
+    }
+
+    for (const record of this.store.cases.values()) {
+      if (record.owner_id !== user.id) continue;
+      const doc = record.documents.find((d) => d.document_id === documentId);
+      if (!doc) continue;
+      return respond(doc.pages);
+    }
+    throw notFound();
   }
 
   async startAnalysis(
     caseId: string,
     expectedRevision: number,
-    _idempotencyKey: string,
+    idempotencyKey: string,
   ): Promise<{ job_id: string; case_id: string; revision: number }> {
     const record = this.requireCase(caseId);
     this.requireRevision(record, expectedRevision);
     if (record.intake.status !== "ready") throw intakeNotReady(record.intake);
 
-    const existing = record.analyses.at(-1);
-    let analysis: Analysis;
-    if (existing) {
-      analysis = existing;
-    } else {
-      analysis = {
-        analysis_id: this.store.nextId("RUN"),
-        case_id: record.case_id,
-        revision: record.revision,
-        status: "ready",
-        execution_mode: "fixture",
-        checklist_version: "tn-goods-v1",
-        legal_coverage: FIXTURE_CONFIG.legal_coverage[record.claim.case_type] ?? "unvalidated",
-        coverage: { reviewed_pages: 0, unreadable_pages: 0, rejected_facts: 0 },
-        checks: [],
-        reconciliation: null,
-      };
-      record.analyses.push(analysis);
+    const cached = this.idempotencyResponses.get(idempotencyKey);
+    if (cached) return cached;
+
+    // B8: "Enforce one active assessment per case" — a new request supersedes
+    // whatever is still running rather than queueing behind it (frontend.md
+    // F4 job state `superseded`).
+    const activeJob = record.jobs.find((j) => j.status === "queued" || j.status === "running");
+    if (activeJob) {
+      this.cancelledJobIds.add(activeJob.id);
+      activeJob.status = "superseded";
     }
 
     const job: Job = {
       id: this.store.nextId("JOB"),
-      status: "succeeded",
-      phase: "publishing",
+      status: "queued",
+      phase: null,
       error: null,
-      result_analysis_id: analysis.analysis_id,
+      result_analysis_id: null,
       result_export_id: null,
     };
     record.jobs.push(job);
-    return { job_id: job.id, case_id: record.case_id, revision: record.revision };
+    const response = { job_id: job.id, case_id: record.case_id, revision: record.revision };
+    this.idempotencyResponses.set(idempotencyKey, response);
+    this.runAnalysisJob(record, job);
+    return response;
+  }
+
+  /** Simulates a real job advancing through B9's exact running phases on a timer, so the dev demo shows honest polling. */
+  private runAnalysisJob(record: StoredCase, job: Job): void {
+    let phaseIndex = 0;
+    const advance = (): void => {
+      if (this.cancelledJobIds.has(job.id)) return;
+      if (phaseIndex < JOB_PHASES.length) {
+        job.status = "running";
+        job.phase = JOB_PHASES[phaseIndex];
+        phaseIndex += 1;
+        setTimeout(advance, PHASE_DURATION_MS);
+        return;
+      }
+      const analysis = this.publishReassessment(record);
+      job.status = "succeeded";
+      job.phase = "publishing";
+      job.result_analysis_id = analysis.analysis_id;
+    };
+    setTimeout(advance, PHASE_DURATION_MS);
+  }
+
+  /** Builds and publishes the next analysis, preserving finding identity across reassessment (FE-06). */
+  private publishReassessment(record: StoredCase): Analysis {
+    const previous = record.analyses.at(-1);
+    const isSecondRun = record.analyses.length === 1;
+    const checks = previous ? this.reassessChecks(previous.checks, record.responses, isSecondRun) : buildBaselineChecks();
+
+    const analysis: Analysis = {
+      analysis_id: this.store.nextId("RUN"),
+      case_id: record.case_id,
+      revision: record.revision,
+      status: "ready",
+      execution_mode: "fixture",
+      checklist_version: "tn-goods-v1",
+      legal_coverage: FIXTURE_CONFIG.legal_coverage[record.claim.case_type] ?? "unvalidated",
+      coverage: {
+        reviewed_pages: previous?.coverage.reviewed_pages ?? 5,
+        unreadable_pages: previous?.coverage.unreadable_pages ?? 1,
+        rejected_facts: previous?.coverage.rejected_facts ?? 1,
+      },
+      checks,
+      reconciliation: previous?.reconciliation ?? null,
+    };
+    record.analyses.push(analysis);
+    record.activity.push({
+      id: this.store.nextId("activity"),
+      type: "analysis_published",
+      message: previous ? "Réévaluation publiée." : "Analyse initiale publiée.",
+      created_at: new Date().toISOString(),
+    });
+    return analysis;
+  }
+
+  /**
+   * P6 demo: the missing-delivery-evidence finding resolves once the
+   * preparer has responded with `add_evidence`; every other still-open
+   * finding stays `still_open`; a new check appears once, on the second run,
+   * to demonstrate the `new` delta after reassessment (finding identity is
+   * preserved throughout via the unchanged `finding_id`s, FE-06).
+   */
+  private reassessChecks(
+    previous: CheckFinding[],
+    responses: Record<string, FindingResponse>,
+    isSecondRun: boolean,
+  ): CheckFinding[] {
+    const next = previous.map((check) => structuredClone(check));
+    for (const check of next) {
+      if (check.finding_status === null) continue; // code-owned not_applicable: unchanged
+      const responded = responses[check.finding_id];
+      if (
+        check.finding_id === DEMO_CASE_CHECK.finding_id &&
+        responded?.action === "add_evidence" &&
+        responded.document_ids.length > 0
+      ) {
+        check.result = "satisfied";
+        check.finding_status = "resolved";
+        check.delta = "resolved";
+        check.reason_code = "EVIDENCE_FOUND";
+        check.message = "Preuve de livraison versée au dossier et validée.";
+        check.reviewed_document_ids = [...new Set([...check.reviewed_document_ids, ...responded.document_ids])];
+        check.evidence_refs = responded.document_ids.map((documentId, index) => ({
+          fact_id: `fact_delivery_evidence_${index}`,
+          document_id: documentId,
+          page: 1,
+          source_text: "Pièce de livraison ajoutée par le préparateur.",
+        }));
+        continue;
+      }
+      check.delta = check.finding_status === "open" ? "still_open" : null;
+    }
+    if (isSecondRun) next.push(structuredClone(DEMO_CASE_CHECK_PAYMENT_DUE));
+    return next;
   }
 
   async getJob(jobId: string): Promise<Job> {
@@ -457,21 +647,21 @@ export class FixtureCaseApi implements CaseApi {
   async listReviewerSubmissions(): Promise<ListResponse<ReviewerSubmissionSummary>> {
     const user = this.requireAuth();
     if (user.role !== "reviewer") throw notFound();
-    const items: ReviewerSubmissionSummary[] = [...this.store.submissions.values()].map((s) => ({
-      submission_id: s.submission_id,
-      case_id: s.case_id,
-      claimant_name: s.snapshot.claim.claimant_name,
-      status: s.status,
-      submitted_at: s.submitted_at,
-    }));
+    const items: ReviewerSubmissionSummary[] = [...this.store.submissions.values()]
+      .filter((s) => RECIPIENT_REVIEWER_ASSIGNMENTS[s.recipient_id] === user.id)
+      .map((s) => ({
+        submission_id: s.submission_id,
+        case_id: s.case_id,
+        claimant_name: s.snapshot.claim.claimant_name,
+        revision: s.revision,
+        status: s.status,
+        submitted_at: s.submitted_at,
+      }));
     return { items, next_cursor: null };
   }
 
   async getReviewerSubmission(submissionId: string): Promise<ReviewerSubmissionDetail> {
-    const user = this.requireAuth();
-    if (user.role !== "reviewer") throw notFound();
-    const stored = this.store.submissions.get(submissionId);
-    if (!stored) throw notFound();
+    const stored = this.requireAssignedSubmission(submissionId);
     return {
       submission_id: stored.submission_id,
       case_id: stored.case_id,
@@ -489,10 +679,7 @@ export class FixtureCaseApi implements CaseApi {
     eventType: ReviewEventType,
     message: string | null,
   ): Promise<ReviewEvent> {
-    const user = this.requireAuth();
-    if (user.role !== "reviewer") throw notFound();
-    const stored = this.store.submissions.get(submissionId);
-    if (!stored) throw notFound();
+    const stored = this.requireAssignedSubmission(submissionId);
 
     const event: ReviewEvent = {
       event_id: this.store.nextId("EVT"),
