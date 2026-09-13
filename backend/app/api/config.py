@@ -7,8 +7,12 @@ exists, and nothing here is case data or a secret.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+import logging
 
+from fastapi import APIRouter
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.api.deps import DbDep
 from app.config import get_settings
 from app.domain.enums import (
     CaseType,
@@ -17,19 +21,48 @@ from app.domain.enums import (
     LegalCoverage,
     RequestedOutcome,
 )
+from app.models.legal import LegalPack
 from app.schemas.config import ConfigOut, LimitsOut
+
+logger = logging.getLogger("app.api.config")
 
 router = APIRouter(tags=["config"])
 
 
+def _current_legal_coverage(db: DbDep) -> LegalCoverage:
+    """Return the real coverage of the configured legal pack (spec/backend.md B5).
+
+    Queries ``legal_packs`` for ``settings.legal_pack_version`` instead of a
+    hardcoded literal, so a future reviewed pack automatically flips this to
+    ``validated`` without a code change. Any lookup failure -- no pack loaded
+    yet, table not migrated, or a stale/unreachable connection -- falls back to
+    ``unvalidated`` rather than raising: B5 requires disabling claims of
+    legal-requirement verification whenever a validated pack is unavailable,
+    and ``GET /config`` must never 500 because of it.
+    """
+    settings = get_settings()
+    try:
+        pack = db.get(LegalPack, settings.legal_pack_version)
+    except SQLAlchemyError:
+        logger.warning(
+            "Legal pack lookup failed for version=%s; reporting unvalidated.",
+            settings.legal_pack_version,
+            exc_info=True,
+        )
+        return LegalCoverage.unvalidated
+    if pack is None:
+        return LegalCoverage.unvalidated
+    return pack.coverage
+
+
 @router.get("/config", response_model=ConfigOut, summary="Client bootstrap configuration")
-def read_config() -> ConfigOut:
+def read_config(db: DbDep) -> ConfigOut:
     """Return the contract vocabulary and limits (spec/backend.md B9).
 
-    ``legal_coverage`` is reported as ``unvalidated`` in this slice: no reviewed
-    legal pack is loaded yet, and B5 requires that claims of legal-requirement
-    verification stay disabled until one is. The legal-pack slice replaces this
-    with the loaded pack's coverage.
+    ``legal_coverage`` reflects the actually-loaded pack for
+    ``settings.legal_pack_version`` (B5). In this hackathon demo the shipped
+    pack is unreviewed, so this still resolves to ``unvalidated`` in practice --
+    but through the real lookup, not a hardcoded literal.
 
     ``execution_mode`` mirrors ``AI_MODE`` so the UI can label fixture output
     (spec/local-dev.md L3).
@@ -46,6 +79,6 @@ def read_config() -> ConfigOut:
             max_case_bytes=settings.max_case_bytes,
             supported_mime_types=list(settings.supported_mime_types),
         ),
-        legal_coverage=LegalCoverage.unvalidated,
+        legal_coverage=_current_legal_coverage(db),
         execution_mode=ExecutionMode(settings.ai_mode.value),
     )
