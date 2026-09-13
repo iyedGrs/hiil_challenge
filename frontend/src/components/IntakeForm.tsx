@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { FloppyDisk } from "@phosphor-icons/react";
 import type { AppConfig, Claim, ClaimDates, FieldError, FollowUpAnswer, IntakeQuestion } from "../api/types";
 import { normalizeClaimedAmount } from "../lib/amount";
 import { Button } from "./Button";
@@ -58,6 +59,10 @@ function claimToValues(claim: Claim): FormValues {
     narrative: claim.narrative,
   };
 }
+
+/** One control style for every field, so hover/focus feedback is identical across the form. */
+const CONTROL_CLASSES =
+  "rounded-sm border border-border-control bg-surface px-3 py-2 text-base text-text transition-colors hover:border-text-muted";
 
 export type IntakeFormResult = { ok: true } | { ok: false; fieldErrors: FieldError[]; message?: string };
 
@@ -174,7 +179,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
             {...fieldProps}
             value={values.case_type}
             onChange={(e) => setValues((prev) => ({ ...prev, case_type: e.target.value }))}
-            className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+            className={CONTROL_CLASSES}
           >
             <option value="">Sélectionnez…</option>
             {config.case_types.map((type) => (
@@ -199,7 +204,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
             maxLength={200}
             value={values.claimant_name}
             onChange={(e) => setValues((prev) => ({ ...prev, claimant_name: e.target.value }))}
-            className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+            className={CONTROL_CLASSES}
           />
         )}
       </FormField>
@@ -217,7 +222,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
             maxLength={200}
             value={values.counterparty_name}
             onChange={(e) => setValues((prev) => ({ ...prev, counterparty_name: e.target.value }))}
-            className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+            className={CONTROL_CLASSES}
           />
         )}
       </FormField>
@@ -237,7 +242,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
               inputMode="decimal"
               value={values.claimed_amount}
               onChange={(e) => setValues((prev) => ({ ...prev, claimed_amount: e.target.value }))}
-              className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text tabular"
+              className={`${CONTROL_CLASSES} tabular`}
             />
           )}
         </FormField>
@@ -248,7 +253,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
               {...fieldProps}
               value={values.currency}
               onChange={(e) => setValues((prev) => ({ ...prev, currency: e.target.value }))}
-              className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+              className={CONTROL_CLASSES}
             >
               <option value="">Sélectionnez…</option>
               {config.currencies.map((currency) => (
@@ -275,7 +280,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
                 type="date"
                 value={values.dates[key] ?? ""}
                 onChange={(e) => setDate(key, e.target.value)}
-                className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text tabular"
+                className={`${CONTROL_CLASSES} tabular`}
               />
             )}
           </FormField>
@@ -293,7 +298,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
             {...fieldProps}
             value={values.requested_outcome}
             onChange={(e) => setValues((prev) => ({ ...prev, requested_outcome: e.target.value }))}
-            className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+            className={CONTROL_CLASSES}
           >
             <option value="">Sélectionnez…</option>
             {config.requested_outcomes.map((outcome) => (
@@ -319,7 +324,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
             maxLength={4000}
             value={values.narrative}
             onChange={(e) => setValues((prev) => ({ ...prev, narrative: e.target.value }))}
-            className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+            className={CONTROL_CLASSES}
           />
         )}
       </FormField>
@@ -339,7 +344,7 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
                   maxLength={1000}
                   value={answers[q.id] ?? ""}
                   onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
-                  className="rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+                  className={CONTROL_CLASSES}
                 />
               )}
             </FormField>
@@ -347,10 +352,11 @@ export function IntakeForm({ config, initialClaim, questions, submitLabel, onSub
         </fieldset>
       )}
 
-      <div>
-        <Button type="submit" disabled={submitting}>
+      <div className="flex items-center gap-3 border-t border-border pt-4">
+        <Button type="submit" icon={<FloppyDisk size={15} />} pending={submitting}>
           {submitting ? "Enregistrement…" : submitLabel}
         </Button>
+        <p className="text-xs text-text-subtle">Les champs marqués d'une astérisque sont obligatoires.</p>
       </div>
     </form>
   );

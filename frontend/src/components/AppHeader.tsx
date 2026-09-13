@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Scales, SignOut } from "@phosphor-icons/react";
 import { useSession } from "../session/SessionContext";
 import { roleHome } from "../session/guards";
+import { Button } from "./Button";
 
 export function AppHeader() {
   const { user, logout } = useSession();
@@ -21,22 +23,32 @@ export function AppHeader() {
   }
 
   return (
-    <header className="flex items-center justify-between gap-4 border-b border-border bg-surface px-6 py-3">
-      <Link to={roleHome(user.role)} className="text-md font-semibold text-text no-underline">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-border bg-surface/95 px-6 backdrop-blur-sm">
+      <Link
+        to={roleHome(user.role)}
+        className="inline-flex items-center gap-2 text-md font-semibold text-text no-underline transition-colors hover:text-accent"
+      >
+        <span
+          aria-hidden="true"
+          className="flex size-7 items-center justify-center rounded-sm bg-accent-soft text-accent"
+        >
+          <Scales size={17} weight="fill" />
+        </span>
         Préparation de dossier
       </Link>
-      <div className="flex items-center gap-4 text-sm">
-        <span className="text-text-muted">
+      <div className="flex items-center gap-3 text-sm">
+        <span className="hidden text-text-muted sm:inline">
           {user.display_name} · {user.role === "reviewer" ? "Relecteur" : "Préparateur"}
         </span>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<SignOut size={15} />}
           onClick={() => void handleLogout()}
           disabled={loggingOut}
-          className="rounded-sm border border-border-strong px-3 py-1.5 text-text transition-colors hover:bg-surface-muted disabled:opacity-50"
         >
           {loggingOut ? "Déconnexion…" : "Se déconnecter"}
-        </button>
+        </Button>
       </div>
     </header>
   );

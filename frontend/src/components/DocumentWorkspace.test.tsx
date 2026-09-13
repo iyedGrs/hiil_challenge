@@ -96,6 +96,6 @@ describe("DocumentWorkspace upload queue", () => {
 
     await waitFor(() => expect(onReload).toHaveBeenCalledTimes(1));
     expect(caseApi.uploadDocument).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText(/Non envoyé — dossier rechargé/)).toBeInTheDocument();
+    expect(await screen.findByText(/Non envoyé, dossier rechargé/)).toBeInTheDocument();
   });
 });

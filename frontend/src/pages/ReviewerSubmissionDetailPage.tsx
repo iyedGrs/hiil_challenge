@@ -93,9 +93,9 @@ export function ReviewerSubmissionDetailPage() {
 
   if (state.status === "loading") {
     return (
-      <div className="mx-auto max-w-4xl px-6 py-10">
-        <div className="h-8 w-64 animate-pulse rounded-sm bg-surface-muted" />
-        <div className="mt-4 h-32 animate-pulse rounded-md bg-surface-muted" />
+      <div className="mx-auto max-w-5xl px-6 py-8">
+        <div className="skeleton h-8 w-64 rounded-sm" />
+        <div className="skeleton mt-4 h-32 rounded-md" />
       </div>
     );
   }
@@ -179,7 +179,9 @@ export function ReviewerSubmissionDetailPage() {
               {activeDocuments.map((doc) => (
                 <Button
                   key={doc.document_id}
+                  size="sm"
                   variant={doc.document_id === selectedDocumentId ? "primary" : "secondary"}
+                  aria-pressed={doc.document_id === selectedDocumentId}
                   onClick={() => {
                     setSelectedDocumentId(doc.document_id);
                     setSelectedPage(1);
@@ -271,7 +273,7 @@ export function ReviewerSubmissionDetailPage() {
             rows={3}
             dir="auto"
             aria-invalid={messageError ? true : undefined}
-            className="mt-1 w-full rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
+            className="mt-1 w-full rounded-sm border border-border-control bg-surface px-3 py-2 text-base text-text transition-colors hover:border-text-muted"
           />
           {messageError && (
             <p role="alert" className="mt-1 text-sm text-danger">
@@ -304,7 +306,12 @@ export function ReviewerSubmissionDetailPage() {
                   <p className="tabular text-xs text-text-subtle">{formatDateFr(event.created_at)}</p>
                   <p className="mt-0.5 text-text">
                     {REVIEW_EVENT_TYPE_LABEL[event.event_type]}
-                    {event.message && <> — <span dir="auto">{event.message}</span></>}
+                    {event.message && (
+                      <>
+                        {" : "}
+                        <span dir="auto">{event.message}</span>
+                      </>
+                    )}
                   </p>
                 </li>
               ))}

@@ -1,4 +1,5 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowLeft } from "@phosphor-icons/react";
 import { caseApi, dataMode } from "../api";
 import { ApiError } from "../api/ApiError";
 import type { Claim } from "../api/types";
@@ -48,12 +49,22 @@ export function NewCasePage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="text-xl font-semibold text-text">Nouveau dossier</h1>
-      <p className="mt-1 text-sm text-text-muted">
-        Décrivez le litige contractuel. {dataMode === "fixture" && "Données de démonstration uniquement."}
+    <div className="mx-auto max-w-2xl px-6 py-8">
+      <Link
+        to="/cases"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-text-muted no-underline transition-colors hover:text-accent"
+      >
+        <ArrowLeft size={15} aria-hidden="true" />
+        Mes dossiers
+      </Link>
+
+      <h1 className="mt-3 text-xl font-semibold text-text">Nouveau dossier</h1>
+      <p className="mt-1 max-w-[65ch] text-sm text-text-muted">
+        Décrivez le litige contractuel. Vous ajouterez les pièces justificatives à l'étape suivante.
+        {dataMode === "fixture" && " Données de démonstration uniquement."}
       </p>
-      <div className="mt-6">
+
+      <div className="mt-6 rounded-md border border-border bg-surface p-5 shadow-raised">
         <IntakeForm
           config={config}
           initialClaim={BLANK_CLAIM}

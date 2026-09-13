@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { CaretRight, FolderSimplePlus, Plus } from "@phosphor-icons/react";
 import { caseApi } from "../api";
 import { ApiError } from "../api/ApiError";
 import type { CaseSummary } from "../api/types";
@@ -33,18 +34,25 @@ export function CasesListPage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text">Mes dossiers</h1>
-        <Link to="/cases/new">
-          <Button variant="primary">Nouveau dossier</Button>
+    <div className="mx-auto max-w-5xl px-6 py-8">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Mes dossiers</h1>
+          <p className="mt-1 text-sm text-text-muted">
+            Reprenez une préparation en cours, ou démarrez une nouvelle réclamation.
+          </p>
+        </div>
+        <Link to="/cases/new" className="no-underline">
+          <Button variant="primary" icon={<Plus size={15} weight="bold" />}>
+            Nouveau dossier
+          </Button>
         </Link>
       </div>
 
       {state.status === "loading" && (
         <ul className="mt-6 flex flex-col gap-3" aria-label="Chargement des dossiers">
           {[0, 1, 2].map((i) => (
-            <li key={i} className="h-20 animate-pulse rounded-md border border-border bg-surface-muted" />
+            <li key={i} className="skeleton h-[86px] rounded-md border border-border" />
           ))}
         </ul>
       )}
@@ -56,10 +64,21 @@ export function CasesListPage() {
       )}
 
       {state.status === "loaded" && state.cases.length === 0 && (
-        <div className="mt-6 rounded-md border border-border bg-surface p-8 text-center">
-          <p className="text-sm text-text-muted">Aucun dossier pour l'instant — créez-en un.</p>
-          <Link to="/cases/new" className="mt-4 inline-block">
-            <Button variant="primary">Créer un dossier</Button>
+        <div className="mt-6 rounded-md border border-dashed border-border-strong bg-surface p-10 text-center">
+          <span
+            aria-hidden="true"
+            className="mx-auto flex size-12 items-center justify-center rounded-full bg-surface-muted text-text-subtle"
+          >
+            <FolderSimplePlus size={26} />
+          </span>
+          <h2 className="mt-4 text-md font-semibold text-text">Aucun dossier pour l'instant</h2>
+          <p className="mx-auto mt-1 max-w-[48ch] text-sm text-text-muted">
+            Un dossier regroupe votre réclamation, les pièces justificatives et le résultat des vérifications.
+          </p>
+          <Link to="/cases/new" className="mt-5 inline-block no-underline">
+            <Button variant="primary" icon={<Plus size={15} weight="bold" />}>
+              Créer un dossier
+            </Button>
           </Link>
         </div>
       )}
@@ -70,25 +89,28 @@ export function CasesListPage() {
             <li key={c.case_id}>
               <Link
                 to={`/cases/${c.case_id}`}
-                className="block rounded-md border border-border bg-surface p-4 transition-colors hover:border-border-strong"
+                className="group flex items-center gap-4 rounded-md border border-border bg-surface p-4 no-underline shadow-raised transition-[border-color,box-shadow] hover:border-border-strong hover:shadow-lifted"
               >
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-md font-medium text-text">
-                      {c.claimant_name} <span className="text-text-subtle">c.</span> {c.counterparty_name}
-                    </p>
-                    <p className="mt-1 text-xs text-text-muted">
-                      Révision <span className="tabular">{c.revision}</span> · mis à jour le{" "}
-                      <span className="tabular">{new Date(c.updated_at).toLocaleString("fr-FR")}</span>
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <p className="tabular text-md font-semibold text-text">
-                      {c.claimed_amount} {c.currency}
-                    </p>
-                    <Badge tone={INTAKE_STATUS_TONE[c.intake_status]}>{INTAKE_STATUS_LABEL[c.intake_status]}</Badge>
-                  </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-md font-medium text-text transition-colors group-hover:text-accent" dir="auto">
+                    {c.claimant_name} <span className="font-normal text-text-subtle">c.</span> {c.counterparty_name}
+                  </p>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Révision <span className="tabular">{c.revision}</span> · mis à jour le{" "}
+                    <span className="tabular">{new Date(c.updated_at).toLocaleString("fr-FR")}</span>
+                  </p>
                 </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <p className="tabular text-md font-semibold text-text">
+                    {c.claimed_amount} <span className="text-xs font-normal text-text-muted">{c.currency}</span>
+                  </p>
+                  <Badge tone={INTAKE_STATUS_TONE[c.intake_status]}>{INTAKE_STATUS_LABEL[c.intake_status]}</Badge>
+                </div>
+                <CaretRight
+                  size={17}
+                  aria-hidden="true"
+                  className="shrink-0 text-text-subtle transition-colors group-hover:text-accent"
+                />
               </Link>
             </li>
           ))}

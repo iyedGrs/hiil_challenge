@@ -156,6 +156,37 @@ describe("FindingCard", () => {
     expect(screen.getByText("Ce document n'existe pas chez nous.")).toBeInTheDocument();
   });
 
+  it("opens itself for an outstanding issue and collapses a settled check", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderCard();
+
+    // `unassessable` is outstanding work, so the body is already readable.
+    const issueHeader = screen.getByRole("button", { name: /Preuve de livraison/ });
+    expect(issueHeader).toHaveAttribute("aria-expanded", "true");
+    unmount();
+
+    const settled = { ...FINDING, result: "satisfied", finding_status: "resolved", actions: [] } as CheckFinding;
+    renderCard({ finding: settled });
+
+    const settledHeader = screen.getByRole("button", { name: /Preuve de livraison/ });
+    expect(settledHeader).toHaveAttribute("aria-expanded", "false");
+    // The outcome still reads in the collapsed row.
+    expect(screen.getByText(/Appuyé par les pièces/)).toBeInTheDocument();
+
+    await user.click(settledHeader);
+    expect(settledHeader).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(FINDING.message)).toBeVisible();
+  });
+
+  it("states the outcome once per card: result and status on one line, not three pills", () => {
+    renderCard();
+    const status = screen.getByText(/Non évaluable/);
+    expect(status).toHaveTextContent("à traiter");
+    // The old vocabulary rendered these as separate standalone badges.
+    expect(screen.queryByText("Ouvert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nouveau")).not.toBeInTheDocument();
+  });
+
   it("requires selecting an owned document before submitting add_evidence", async () => {
     const user = userEvent.setup();
     renderCard();

@@ -43,7 +43,7 @@ export function ReviewerSubmissionsPage() {
       {state.status === "loading" && (
         <ul className="mt-6 flex flex-col gap-3" aria-label="Chargement des dossiers assignés">
           {[0, 1, 2].map((i) => (
-            <li key={i} className="h-20 animate-pulse rounded-md border border-border bg-surface-muted" />
+            <li key={i} className="skeleton h-20 rounded-md border border-border" />
           ))}
         </ul>
       )}
@@ -66,7 +66,7 @@ export function ReviewerSubmissionsPage() {
             <li key={s.submission_id}>
               <Link
                 to={`/reviewer/submissions/${s.submission_id}`}
-                className="block rounded-md border border-border bg-surface p-4 transition-colors hover:border-border-strong"
+                className="block rounded-md border border-border bg-surface p-4 no-underline shadow-raised transition-[border-color,box-shadow] hover:border-border-strong hover:shadow-lifted"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
