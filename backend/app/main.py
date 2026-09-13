@@ -18,7 +18,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api import auth, config as config_routes, health
+from app.api import auth, config as config_routes, documents as document_routes, health
 from app.config import Settings, get_settings
 from app.db import session_scope
 from app.errors import register_error_handlers
@@ -117,6 +117,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix=API_PREFIX)
     app.include_router(config_routes.router, prefix=API_PREFIX)
     app.include_router(auth.router, prefix=API_PREFIX)
+    app.include_router(document_routes.router, prefix=API_PREFIX)
 
     return app
 
