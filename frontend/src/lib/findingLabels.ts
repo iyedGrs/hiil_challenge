@@ -17,7 +17,21 @@ import type {
   FindingDelta,
   FindingStatus,
   LegalCoverageStatus,
+  ReadinessStatusValue,
 } from "../api/types";
+
+/** Automatic case readiness verdict (spec/progress.md change log). */
+export const READINESS_LABEL: Record<ReadinessStatusValue, string> = {
+  complete: "Dossier complet et cohérent, prêt à transmettre",
+  incomplete: "Dossier incomplet",
+  needs_analysis: "Analyse requise",
+};
+
+export const READINESS_TONE: Record<ReadinessStatusValue, BadgeTone> = {
+  complete: "success",
+  incomplete: "warning",
+  needs_analysis: "info",
+};
 
 /**
  * Copy is neutral and never implies fraud, authenticity or a legal verdict

@@ -55,6 +55,7 @@ function baseDetail(overrides: Partial<CaseDetail> = {}): CaseDetail {
     documents: [],
     latest_job: null,
     latest_analysis: baseAnalysis(),
+    readiness: { status: "complete", reasons: [] },
     submissions: [],
     activity: [],
     responses: [],
@@ -81,7 +82,7 @@ describe("SubmissionPanel", () => {
     render(<SubmissionPanel caseId="CASE_001" detail={detail} onReload={vi.fn()} onNavigateToChecks={vi.fn()} />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(/révision antérieure/i);
-    await selectRecipientAndConfirm();
+    expect(screen.getByLabelText("Destinataire")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Transmettre" })).toBeDisabled();
   });
 
@@ -92,20 +93,31 @@ describe("SubmissionPanel", () => {
     render(<SubmissionPanel caseId="CASE_001" detail={detail} onReload={vi.fn()} onNavigateToChecks={vi.fn()} />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(/dernière tentative d'analyse a échoué/i);
-    await selectRecipientAndConfirm();
+    expect(screen.getByLabelText("Destinataire")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Transmettre" })).toBeDisabled();
   });
 
-  it("requires an explicit acknowledgement checkbox before a partial analysis can be submitted", async () => {
+  it("requires an explicit acknowledgement checkbox before a partial analysis can be exported", async () => {
     const detail = baseDetail({ latest_analysis: baseAnalysis({ status: "partial" }) });
     render(<SubmissionPanel caseId="CASE_001" detail={detail} onReload={vi.fn()} onNavigateToChecks={vi.fn()} />);
 
-    await selectRecipientAndConfirm();
-    expect(screen.getByRole("button", { name: "Transmettre" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Générer le dossier" })).toBeDisabled();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("checkbox", { name: /analyse est partielle/i }));
-    expect(screen.getByRole("button", { name: "Transmettre" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Générer le dossier" })).toBeEnabled();
+  });
+
+  it("disables submission and shows the reasons when the readiness verdict is not complete", async () => {
+    const detail = baseDetail({
+      readiness: { status: "incomplete", reasons: ["Analyse simulée : aucun verdict."] },
+    });
+    render(<SubmissionPanel caseId="CASE_001" detail={detail} onReload={vi.fn()} onNavigateToChecks={vi.fn()} />);
+
+    expect(screen.getByText("Dossier incomplet")).toBeInTheDocument();
+    expect(screen.getByText("Analyse simulée : aucun verdict.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Destinataire")).toBeDisabled();
+    expect(screen.queryByRole("checkbox", { name: /Je confirme la transmission/ })).not.toBeInTheDocument();
   });
 
   it("shows the confirmation text and submission ID on a successful submit", async () => {

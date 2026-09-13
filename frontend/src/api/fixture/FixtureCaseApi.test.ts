@@ -284,8 +284,30 @@ describe("FixtureCaseApi", () => {
   describe("reviewer back office (UI-08)", () => {
     const CASE_ID = "CASE_001"; // seeded demo case, revision 1, published analysis RUN_001
 
+    /**
+     * The seeded demo analysis is deliberately unresolved (some checks
+     * `unassessable`/`contradicted`), so submission is refused by the
+     * automatic readiness gate (spec/progress.md change log). Force it into
+     * the shape a genuinely complete, live run would have — the same
+     * approach backend/tests/test_handoff.py's `force_complete_verdict`
+     * takes — so these tests can exercise the reviewer read paths.
+     */
+    function forceCompleteVerdict(): void {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reach into the private fixture store, test-only
+      const record = (api as any).store.cases.get(CASE_ID);
+      const analysis = record.analyses.find((a: { analysis_id: string }) => a.analysis_id === "RUN_001");
+      analysis.execution_mode = "live";
+      analysis.status = "ready";
+      analysis.coverage = { ...analysis.coverage, unreadable_pages: 0 };
+      for (const check of analysis.checks) {
+        check.result = "satisfied";
+        check.finding_status = null;
+      }
+    }
+
     async function submitDemoCase(): Promise<string> {
       await api.login("amina.preparer@example.tn", FIXTURE_DEMO_PASSWORD);
+      forceCompleteVerdict();
       const submission = await api.createSubmission(
         CASE_ID,
         1,
@@ -296,6 +318,13 @@ describe("FixtureCaseApi", () => {
       );
       return submission.submission_id;
     }
+
+    it("refuses submission while the automatic verdict is not complete", async () => {
+      await api.login("amina.preparer@example.tn", FIXTURE_DEMO_PASSWORD);
+      await expect(
+        api.createSubmission(CASE_ID, 1, "RUN_001", "recipient_reviewer_demo", false, "idem-blocked"),
+      ).rejects.toMatchObject({ status: 409 });
+    });
 
     it("lets the assigned reviewer see and act on a submission", async () => {
       const submissionId = await submitDemoCase();

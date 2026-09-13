@@ -1,4 +1,4 @@
-import { ArrowRight, CaretDown, CheckCircle, Warning, WarningOctagon, type Icon } from "@phosphor-icons/react";
+import { CaretDown, CheckCircle, Warning, WarningOctagon, type Icon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import type { CheckFinding } from "../api/types";
 import type { AnalysisVerdict as Verdict, VerdictTone } from "../lib/verdict";
@@ -43,8 +43,6 @@ interface AnalysisVerdictProps {
   onFocusFinding: (findingId: string) => void;
   onRerun: () => void;
   rerunPending: boolean;
-  /** Present only when the dossier can actually move to the transmission step. */
-  onContinue?: () => void;
   /** Safety notice (outdated / partial coverage) shown inside the panel, with role="alert". */
   notice?: ReactNode;
 }
@@ -54,15 +52,11 @@ interface AnalysisVerdictProps {
  * whole outcome in one line, then turns every remaining issue into a label that
  * navigates to the finding it names, so the user never reads six cards looking
  * for the one that is wrong.
+ *
+ * It answers "is the analysis clean", not "can this be transmitted". The
+ * forward action belongs to ReadinessNotice, which owns the actual gate.
  */
-export function AnalysisVerdict({
-  verdict,
-  onFocusFinding,
-  onRerun,
-  rerunPending,
-  onContinue,
-  notice,
-}: AnalysisVerdictProps) {
+export function AnalysisVerdict({ verdict, onFocusFinding, onRerun, rerunPending, notice }: AnalysisVerdictProps) {
   const ToneIcon = TONE_ICON[verdict.tone];
 
   return (
@@ -90,11 +84,6 @@ export function AnalysisVerdict({
         </div>
 
         <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-          {onContinue && (
-            <Button onClick={onContinue} icon={<ArrowRight size={16} />}>
-              Passer à la transmission
-            </Button>
-          )}
           <Button variant="secondary" size="sm" onClick={onRerun} pending={rerunPending}>
             Relancer l'analyse
           </Button>

@@ -27,6 +27,7 @@ from app.schemas.common import ResponseModel, StrictModel
 from app.schemas.documents import DocumentOut
 from app.schemas.findings import FindingResponseOut
 from app.schemas.jobs import JobOut
+from app.schemas.readiness import ReadinessOut
 from app.schemas.submissions import SubmissionSummaryOut
 
 #: Bounds from the B3 input-constraints table.
@@ -251,6 +252,7 @@ class CaseDetailOut(ResponseModel):
     documents: list[DocumentOut]
     latest_job: JobOut | None
     latest_analysis: AnalysisOut | None
+    readiness: ReadinessOut
     submissions: list[SubmissionSummaryOut]
     activity: list[ActivityEventOut]
     responses: list[FindingResponseOut]

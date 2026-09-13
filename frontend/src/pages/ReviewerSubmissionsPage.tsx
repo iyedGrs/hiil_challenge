@@ -4,6 +4,7 @@ import { caseApi } from "../api";
 import { ApiError } from "../api/ApiError";
 import type { ReviewerSubmissionSummary } from "../api/types";
 import { Badge } from "../components/Badge";
+import { READINESS_LABEL, READINESS_TONE } from "../lib/findingLabels";
 import { reviewerStatusLabel, reviewerStatusTone } from "../lib/reviewerLabels";
 
 type LoadState =
@@ -85,7 +86,10 @@ export function ReviewerSubmissionsPage() {
                       soumis le <span className="tabular">{formatDateFr(s.submitted_at)}</span>
                     </p>
                   </div>
-                  <Badge tone={reviewerStatusTone(s.status)}>{reviewerStatusLabel(s.status)}</Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge tone={reviewerStatusTone(s.status)}>{reviewerStatusLabel(s.status)}</Badge>
+                    <Badge tone={READINESS_TONE[s.readiness.status]}>{READINESS_LABEL[s.readiness.status]}</Badge>
+                  </div>
                 </div>
               </Link>
             </li>

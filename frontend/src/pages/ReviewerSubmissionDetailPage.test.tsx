@@ -1,5 +1,4 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/ApiError";
@@ -76,6 +75,7 @@ function baseDetail(overrides: Partial<ReviewerSubmissionDetail> = {}): Reviewer
       ],
       reconciliation: null,
     },
+    readiness: { status: "complete", reasons: [] },
     responses: [],
     events: [],
     ...overrides,
@@ -114,42 +114,32 @@ describe("ReviewerSubmissionDetailPage", () => {
     expect(screen.queryByRole("button", { name: "Ajouter une pièce" })).not.toBeInTheDocument();
     // Received/reviewed must not read as legal acceptance.
     expect(screen.getByText(/n'emporte aucune acceptation/)).toBeInTheDocument();
+    // The frozen readiness verdict is shown, not decided by the reviewer.
+    expect(screen.getByText("Dossier complet et cohérent, prêt à transmettre")).toBeInTheDocument();
   });
 
-  it("requires a message before requesting clarification, then records the event", async () => {
+  it("is a read-only inbox: no action to mark received/reviewed or request clarification", async () => {
     vi.mocked(caseApi.getReviewerSubmission).mockResolvedValueOnce(baseDetail());
-    vi.mocked(caseApi.getDocumentPage).mockResolvedValue({
-      document_id: "DOC_001",
-      page: 1,
-      image_url: null,
-      source_text: null,
-      method: null,
-      quality: null,
-    });
+    renderPage();
+    await screen.findAllByText("facture_0001.pdf");
+
+    expect(screen.queryByRole("button", { name: "Marquer comme reçu" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Marquer comme examiné" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Demander une clarification")).not.toBeInTheDocument();
+    expect(caseApi.createReviewEvent).not.toHaveBeenCalled();
+  });
+
+  it("still shows prior reviewer events as read-only history", async () => {
     const event: ReviewEvent = {
       event_id: "EVT_001",
       event_type: "clarification_requested",
       message: "Merci de préciser la date de livraison.",
       created_at: "2026-06-13T10:00:00Z",
     };
-    vi.mocked(caseApi.createReviewEvent).mockResolvedValueOnce(event);
+    vi.mocked(caseApi.getReviewerSubmission).mockResolvedValueOnce(baseDetail({ events: [event] }));
 
-    const user = userEvent.setup();
     renderPage();
-    await screen.findAllByText("facture_0001.pdf");
 
-    await user.click(screen.getByRole("button", { name: "Envoyer la demande de clarification" }));
-    expect(screen.getByText(/Un message est requis/)).toBeInTheDocument();
-    expect(caseApi.createReviewEvent).not.toHaveBeenCalled();
-
-    await user.type(screen.getByLabelText("Demander une clarification"), "Merci de préciser la date de livraison.");
-    await user.click(screen.getByRole("button", { name: "Envoyer la demande de clarification" }));
-
-    expect(caseApi.createReviewEvent).toHaveBeenCalledWith(
-      "SUB_001",
-      "clarification_requested",
-      "Merci de préciser la date de livraison.",
-    );
     expect(await screen.findByText(/Merci de préciser la date de livraison\./)).toBeInTheDocument();
   });
 

@@ -22,7 +22,8 @@ import { IntakeForm, type IntakeFormResult } from "../components/IntakeForm";
 import { SubmissionPanel } from "../components/SubmissionPanel";
 import { useToast } from "../components/Toast";
 import { useSession } from "../session/SessionContext";
-import { INTAKE_STATUS_LABEL, INTAKE_STATUS_TONE } from "../lib/intakeStatus";
+import { INTAKE_STATUS_LABEL } from "../lib/intakeStatus";
+import { READINESS_LABEL, READINESS_TONE } from "../lib/findingLabels";
 import { buildVerdict } from "../lib/verdict";
 
 type LoadState = { status: "loading" } | { status: "error"; message: string } | { status: "loaded"; detail: CaseDetail };
@@ -195,6 +196,21 @@ export function CaseDetailPage() {
       ? "done"
       : "attention";
 
+  /*
+   * The automatic readiness verdict gates transmission, so it drives that
+   * step's own state in the rail instead of only appearing once the user has
+   * arrived there.
+   */
+  const readiness = detail.readiness;
+  const submissionState: FlowStepState =
+    detail.submissions.length > 0
+      ? "done"
+      : readiness.status === "complete"
+        ? "current"
+        : readiness.status === "incomplete"
+          ? "attention"
+          : "todo";
+
   const steps: FlowStep[] = [
     {
       id: "claim",
@@ -223,8 +239,10 @@ export function CaseDetailPage() {
       hint:
         detail.submissions.length > 0
           ? `${detail.submissions.length} envoi${detail.submissions.length > 1 ? "s" : ""}`
-          : "Pas encore transmis",
-      state: detail.submissions.length > 0 ? "done" : "todo",
+          : readiness.status === "complete"
+            ? "Prêt à transmettre"
+            : READINESS_LABEL[readiness.status],
+      state: submissionState,
       icon: PaperPlaneTilt,
     },
   ];
@@ -254,12 +272,17 @@ export function CaseDetailPage() {
           </p>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
-          <p className="tabular text-lg leading-none font-semibold text-text">
-            {detail.claim.claimed_amount} <span className="text-sm text-text-muted">{detail.claim.currency}</span>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <p className="tabular text-lg leading-none font-semibold tracking-tighter text-text">
+            {detail.claim.claimed_amount} <span className="text-sm font-medium text-text-muted">{detail.claim.currency}</span>
           </p>
           <div className="flex items-center gap-2">
-            <Badge tone={INTAKE_STATUS_TONE[detail.intake.status]}>{INTAKE_STATUS_LABEL[detail.intake.status]}</Badge>
+            {/*
+             * The whole-case readiness verdict, not the intake gate: intake
+             * state stays visible as the Réclamation step's own state in the
+             * flow rail, so the header carries one status, not a stack.
+             */}
+            <Badge tone={READINESS_TONE[readiness.status]}>{READINESS_LABEL[readiness.status]}</Badge>
             <Button
               variant="ghost"
               size="sm"
@@ -273,6 +296,10 @@ export function CaseDetailPage() {
             </Button>
           </div>
         </div>
+      </div>
+
+      <div className="mt-4">
+        <Badge tone={READINESS_TONE[detail.readiness.status]}>{READINESS_LABEL[detail.readiness.status]}</Badge>
       </div>
 
       {banner && (

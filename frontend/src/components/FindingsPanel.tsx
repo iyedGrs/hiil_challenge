@@ -8,6 +8,7 @@ import { Badge } from "./Badge";
 import { Button } from "./Button";
 import { FindingCard } from "./FindingCard";
 import { JobProgress } from "./JobProgress";
+import { ReadinessNotice } from "./ReadinessNotice";
 import { useToast } from "./Toast";
 import { useJobPolling } from "../lib/useJobPolling";
 import { buildVerdict, sortChecksForReview } from "../lib/verdict";
@@ -198,6 +199,7 @@ export function FindingsPanel({
   if (!analysis) {
     return (
       <div className="flex flex-col gap-4">
+        <ReadinessNotice readiness={detail.readiness} />
         {runControls}
         {!isJobActive && !failedJob && (
           <div className="rounded-md border border-dashed border-border-strong bg-surface p-8 text-center">
@@ -233,8 +235,6 @@ export function FindingsPanel({
     return true;
   });
 
-  const canContinue = !isOutdated && !isJobActive && onNavigateToSubmission !== undefined;
-
   // One statement, inside the verdict panel, instead of a second stacked banner.
   const notice = isOutdated ? (
     <p role="alert">
@@ -257,8 +257,18 @@ export function FindingsPanel({
         onFocusFinding={focusFinding}
         onRerun={() => void handleStart()}
         rerunPending={starting || isJobActive}
-        onContinue={canContinue ? onNavigateToSubmission : undefined}
         notice={notice}
+      />
+
+      {/*
+       * The readiness verdict is what actually gates transmission, so it carries
+       * the forward action. Keeping it separate from the analysis verdict above
+       * matters: in fixture mode every check can be satisfied while the case
+       * stays incomplete because no live analysis ran.
+       */}
+      <ReadinessNotice
+        readiness={detail.readiness}
+        onContinue={!isOutdated && !isJobActive ? onNavigateToSubmission : undefined}
       />
 
       {analysis.reconciliation && (

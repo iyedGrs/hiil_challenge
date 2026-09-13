@@ -13,6 +13,7 @@ import type { CaseDetail, ExportStatus, Recipient, Submission } from "../api/typ
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 import { EXPORT_PHASES, JobProgress } from "./JobProgress";
+import { ReadinessNotice } from "./ReadinessNotice";
 import { useToast } from "./Toast";
 import { useJobPolling } from "../lib/useJobPolling";
 import { ANALYSIS_STATUS_LABEL, ANALYSIS_STATUS_TONE, LEGAL_COVERAGE_LABEL, LEGAL_COVERAGE_TONE } from "../lib/findingLabels";
@@ -42,6 +43,7 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
   const analysis = detail.latest_analysis;
   const job = detail.latest_job;
 
+  const readiness = detail.readiness;
   const jobFailed = job?.status === "failed";
   const isOutdated = analysis !== null && (analysis.status === "outdated" || analysis.revision < detail.revision);
   const isPartial = analysis !== null && analysis.status === "partial" && !isOutdated;
@@ -57,10 +59,17 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
         ? `Cette analyse porte sur une révision antérieure du dossier (analyse ${analysis!.revision} / dossier ${detail.revision}).`
         : null;
 
+  // Export remains available for an incomplete case (it is a preparation
+  // package, not the handoff): it keeps its own acknowledgement checkboxes.
   const [ackPartial, setAckPartial] = useState(false);
   const [ackUnresolved, setAckUnresolved] = useState(false);
   const acknowledgeUnresolved = ackPartial || ackUnresolved;
-  const readyToProceed = !blocked && (!isPartial || ackPartial) && (unresolvedFindings.length === 0 || ackUnresolved);
+  const readyToExport = !blocked && (!isPartial || ackPartial) && (unresolvedFindings.length === 0 || ackUnresolved);
+
+  // Submission is gated by the automatic readiness verdict, plus the same
+  // "no usable analysis" guard export uses: no reviewer acknowledgement step
+  // (spec/progress.md change log).
+  const readyToSubmit = !blocked && readiness.status === "complete";
 
   // ---- Export -------------------------------------------------------------
   const [exportJobId, setExportJobId] = useState<string | null>(null);
@@ -143,7 +152,9 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
         detail.revision,
         analysis.analysis_id,
         recipientId,
-        acknowledgeUnresolved,
+        // No acknowledgement gate on submission: the readiness verdict
+        // decides eligibility. Kept as a request field for compatibility.
+        false,
         idempotencyKey,
       );
       submissionIdempotencyKeyRef.current = null;
@@ -313,8 +324,8 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
             className="mt-0.5"
           />
           <span>
-            Des constats restent non résolus et seront transmis tels quels. Je reconnais qu'ils sont conservés dans le
-            dossier.
+            Des constats restent non résolus et seront inclus dans le dossier téléchargé. Je reconnais ces limites et
+            souhaite générer le dossier.
           </span>
         </label>
       )}
@@ -368,7 +379,7 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
               variant="secondary"
               icon={<FileArrowDown size={15} />}
               onClick={() => void handleExport()}
-              disabled={!readyToProceed}
+              disabled={!readyToExport}
               pending={exporting}
             >
               Générer le dossier
@@ -380,6 +391,17 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
       {/* 4. Submission */}
       <div className="rounded-md border border-border bg-surface p-5 shadow-raised">
         <h2 className="text-md font-semibold text-text">Transmission pour examen</h2>
+
+        {/*
+         * Why the recipient controls below may be unavailable. Rendered through
+         * the same component the Vérifications step uses, so the verdict reads
+         * identically wherever the preparer meets it.
+         */}
+        {!submissionResult && readiness.status !== "complete" && (
+          <div className="mt-4">
+            <ReadinessNotice readiness={readiness} />
+          </div>
+        )}
 
         {submissionResult ? (
           <div className="mt-4 rounded-md border border-success/30 bg-success-bg p-4 text-sm text-success animate-enter-up">
@@ -402,11 +424,12 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
               <select
                 id={recipientFieldId}
                 value={recipientId}
+                disabled={!readyToSubmit}
                 onChange={(e) => {
                   setRecipientId(e.target.value);
                   setConfirmed(false);
                 }}
-                className={`${SELECT_CLASSES} max-w-sm`}
+                className={`${SELECT_CLASSES} max-w-sm disabled:opacity-50`}
               >
                 <option value="">Sélectionner…</option>
                 {recipients.map((recipient) => (
@@ -418,7 +441,7 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
               {selectedRecipient && <p className="text-xs text-text-subtle">{selectedRecipient.remit}</p>}
             </div>
 
-            {recipientId && (
+            {readyToSubmit && recipientId && (
               <label className="flex items-start gap-2.5 rounded-sm border border-border bg-surface-muted p-3 text-sm text-text">
                 <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
                 <span>
@@ -438,7 +461,7 @@ export function SubmissionPanel({ caseId, detail, onReload, onNavigateToChecks }
               <Button
                 icon={<PaperPlaneTilt size={15} />}
                 onClick={() => void handleSubmit()}
-                disabled={!readyToProceed || !recipientId || !confirmed}
+                disabled={!readyToSubmit || !recipientId || !confirmed}
                 pending={submitting}
               >
                 {submitting ? "Transmission…" : "Transmettre"}

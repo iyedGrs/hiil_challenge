@@ -16,6 +16,7 @@ from app.schemas.cases import ClaimOut
 from app.schemas.common import ResponseModel
 from app.schemas.documents import DocumentOut
 from app.schemas.findings import FindingResponseOut
+from app.schemas.readiness import ReadinessOut
 from app.schemas.submissions import ReviewEventOut
 
 
@@ -28,5 +29,6 @@ class ReviewerSubmissionDetailOut(ResponseModel):
     claim: ClaimOut
     documents: list[DocumentOut]
     analysis: AnalysisOut
+    readiness: ReadinessOut
     responses: list[FindingResponseOut]
     events: list[ReviewEventOut]
