@@ -51,6 +51,14 @@ export const FIXTURE_CONFIG: AppConfig = {
 
 export const FIXTURE_RECIPIENTS: Recipient[] = [{ recipient_id: "recipient_reviewer_demo", name: "Reviewer Démo" }];
 
+// PROVISIONAL (B9 gap): B9 does not enumerate how a recipient maps to a
+// signed-in reviewer account; assumed a fixed recipient->reviewer assignment
+// so the inbox (UI-08) only ever lists submissions assigned to the signed-in
+// reviewer (frontend.md "Reviewer back office").
+export const RECIPIENT_REVIEWER_ASSIGNMENTS: Record<string, string> = {
+  recipient_reviewer_demo: "user_reviewer",
+};
+
 /** Demo case per spec/progress.md P6: a 20,000 TND unpaid_goods_invoice claim. */
 export const DEMO_CASE_CLAIM: Claim = {
   case_type: "unpaid_goods_invoice",

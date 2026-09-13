@@ -280,4 +280,88 @@ describe("FixtureCaseApi", () => {
       expect(retried.job_id).toBe(first.job_id);
     });
   });
+
+  describe("reviewer back office (UI-08)", () => {
+    const CASE_ID = "CASE_001"; // seeded demo case, revision 1, published analysis RUN_001
+
+    async function submitDemoCase(): Promise<string> {
+      await api.login("amina.preparer@example.tn", FIXTURE_DEMO_PASSWORD);
+      const submission = await api.createSubmission(
+        CASE_ID,
+        1,
+        "RUN_001",
+        "recipient_reviewer_demo",
+        false,
+        "idem-submit",
+      );
+      return submission.submission_id;
+    }
+
+    it("lets the assigned reviewer see and act on a submission", async () => {
+      const submissionId = await submitDemoCase();
+      await api.login("reviewer@example.tn", FIXTURE_DEMO_PASSWORD);
+
+      const { items } = await api.listReviewerSubmissions();
+      expect(items.map((s) => s.submission_id)).toContain(submissionId);
+
+      const detail = await api.getReviewerSubmission(submissionId);
+      expect(detail.claim.claimant_name).toBe("Amina Gharbi");
+    });
+
+    it("keeps the preparer's role from calling reviewer-only routes", async () => {
+      const submissionId = await submitDemoCase();
+      // still logged in as the preparer
+      await expect(api.listReviewerSubmissions()).rejects.toMatchObject({ status: 404 });
+      await expect(api.getReviewerSubmission(submissionId)).rejects.toMatchObject({ status: 404 });
+      await expect(api.createReviewEvent(submissionId, "received", null)).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("returns not-found for an unknown submission id, honestly rather than leaking existence", async () => {
+      await api.login("reviewer@example.tn", FIXTURE_DEMO_PASSWORD);
+      await expect(api.getReviewerSubmission("SUB_DOES_NOT_EXIST")).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("FE-09: a reviewer keeps seeing the submitted revision after the preparer edits the working case", async () => {
+      const submissionId = await submitDemoCase();
+      // Preparer edits the claim and uploads a new document after submitting.
+      await api.updateClaim(CASE_ID, 1, {
+        case_type: "unpaid_goods_invoice",
+        claimant_name: "Amina Gharbi (modifié)",
+        counterparty_name: "Client Démo SARL",
+        claimed_amount: "99999.000",
+        currency: "TND",
+        dates: { contract: null, delivery: null, invoice: null, payment_due: null },
+        requested_outcome: "payment",
+        narrative: "Narration modifiée après la transmission du dossier pour vérifier l'immuabilité (FE-09).",
+        follow_up_answers: [],
+      });
+      await api.uploadDocument(CASE_ID, 2, new File([new Uint8Array(10)], "nouvelle_piece.pdf", { type: "application/pdf" }));
+
+      await api.login("reviewer@example.tn", FIXTURE_DEMO_PASSWORD);
+      const detail = await api.getReviewerSubmission(submissionId);
+
+      expect(detail.claim.claimant_name).toBe("Amina Gharbi");
+      expect(detail.claim.claimed_amount).toBe("20000.000");
+      expect(detail.documents.some((d) => d.filename === "nouvelle_piece.pdf")).toBe(false);
+
+      // Page previews are read from the frozen snapshot's documents too.
+      const page = await api.getDocumentPage("DOC_001", 1);
+      expect(page.source_text).toContain("Facture n° 0001");
+    });
+
+    it("creates a review event and a matching activity entry in the case (clarification notification)", async () => {
+      const submissionId = await submitDemoCase();
+      await api.login("reviewer@example.tn", FIXTURE_DEMO_PASSWORD);
+
+      const event = await api.createReviewEvent(submissionId, "clarification_requested", "Merci de préciser la date de livraison.");
+      expect(event.message).toBe("Merci de préciser la date de livraison.");
+
+      const detail = await api.getReviewerSubmission(submissionId);
+      expect(detail.events).toHaveLength(1);
+
+      await api.login("amina.preparer@example.tn", FIXTURE_DEMO_PASSWORD);
+      const caseDetail = await api.getCase(CASE_ID);
+      expect(caseDetail.activity.some((a) => a.type === "reviewer_clarification_requested")).toBe(true);
+    });
+  });
 });

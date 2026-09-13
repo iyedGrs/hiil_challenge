@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { caseApi } from "../api";
 import { ApiError } from "../api/ApiError";
-import type { CaseDetail, Claim, DocumentRecord, FindingResponse } from "../api/types";
+import type { ActivityEvent, CaseDetail, Claim, DocumentRecord, FindingResponse } from "../api/types";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { DocumentWorkspace } from "../components/DocumentWorkspace";
@@ -14,6 +14,33 @@ import { useSession } from "../session/SessionContext";
 import { INTAKE_STATUS_LABEL, INTAKE_STATUS_TONE } from "../lib/intakeStatus";
 
 type LoadState = { status: "loading" } | { status: "error"; message: string } | { status: "loaded"; detail: CaseDetail };
+
+/** "Activité" tab: the case's activity log, newest first (UI-08: surfaces reviewer clarification requests here too). */
+function ActivityTimeline({ activity }: { activity: ActivityEvent[] }) {
+  if (activity.length === 0) {
+    return <p className="text-sm text-text-muted">Aucune activité pour l'instant.</p>;
+  }
+  const sorted = [...activity].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return (
+    <ul className="flex flex-col gap-2">
+      {sorted.map((event) => (
+        <li
+          key={event.id}
+          className={`rounded-md border p-3 text-sm ${
+            event.type === "reviewer_clarification_requested"
+              ? "border-warning bg-warning-bg text-warning"
+              : "border-border bg-surface text-text"
+          }`}
+        >
+          <p className="tabular text-xs text-text-subtle">{new Date(event.created_at).toLocaleString("fr-FR")}</p>
+          <p className="mt-0.5" dir="auto">
+            {event.message}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 const WORKSPACE_TABS = [
   { id: "documents", label: "Documents" },
@@ -243,6 +270,8 @@ export function CaseDetailPage() {
                     onReload={load}
                     onOpenDocumentPage={openDocumentPage}
                   />
+                ) : tab.id === "activity" ? (
+                  <ActivityTimeline activity={detail.activity} />
                 ) : tab.id === "submission" && caseId ? (
                   <SubmissionPanel
                     caseId={caseId}

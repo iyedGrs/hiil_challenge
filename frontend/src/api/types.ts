@@ -364,11 +364,13 @@ export interface Submission {
 // ---------------------------------------------------------------------------
 
 // PROVISIONAL (B9 gap): reviewer submission summary fields are not enumerated
-// ("Assigned submission summaries").
+// ("Assigned submission summaries"). `revision` is UI-added (not confirmed by
+// B9) so the inbox can show which case revision was frozen at submission time.
 export interface ReviewerSubmissionSummary {
   submission_id: string;
   case_id: string;
   claimant_name: string;
+  revision?: number;
   status: string;
   submitted_at: string;
 }
