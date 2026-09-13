@@ -23,7 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import CSRF_HEADER_NAME
-from app.domain.enums import ExportState, JobStatus, SubmissionState
+from app.domain.enums import AnalysisStatus, CheckResult, ExecutionMode, ExportState, JobStatus, SubmissionState
+from app.models.analysis import Analysis, CheckResultRow
 from app.models.job import Job
 from app.models.submission import Export
 from app.pipeline.export import handle_export_job
@@ -62,6 +63,27 @@ def prepared_case(client: TestClient, db: Session) -> tuple[str, int, str, dict[
     return case_id, revision, analysis["analysis_id"], headers
 
 
+def force_complete_verdict(db: Session, analysis_id: str) -> None:
+    """Force ``analysis_id`` into a genuinely "complete" readiness verdict.
+
+    The fixture pipeline deliberately leaves the demo claim/payment
+    reconciliation mismatched (spec/backend.md BE-07), so tests that need a
+    submittable dossier force the published run into the shape a clean live
+    run would have published: real execution, full coverage, every check
+    satisfied.
+    """
+    analysis = db.get(Analysis, analysis_id)
+    assert analysis is not None
+    analysis.execution_mode = ExecutionMode.live
+    analysis.status = AnalysisStatus.ready
+    for row in db.scalars(
+        select(CheckResultRow).where(CheckResultRow.analysis_id == analysis_id)
+    ).all():
+        row.result = CheckResult.satisfied
+        row.finding_status = None
+    db.commit()
+
+
 def run_export_job(client: TestClient, db: Session, job_id: str) -> None:
     """Execute the queued export job inline, mirroring the worker loop."""
     job = db.get(Job, job_id)
@@ -90,10 +112,16 @@ def test_recipients_are_server_owned(client: TestClient, seeded: None) -> None:
     assert "no official filing" in row["remit"]
 
 
-def test_unresolved_submission_requires_explicit_acknowledgement(
+def test_incomplete_case_cannot_be_submitted(
     client: TestClient, db: Session, seeded: None
 ) -> None:
-    """BE-14: unresolved items block an implicit submission (spec/backend.md B10)."""
+    """Submission is only reachable once the automatic verdict is "complete".
+
+    Reviewers no longer decide completeness or acknowledge unresolved items
+    (spec/progress.md change log: readiness verdict replaces reviewer
+    approval); the ``acknowledge_unresolved`` field is still accepted for
+    compatibility but no longer changes the outcome.
+    """
     case_id, revision, analysis_id, headers = prepared_case(client, db)
     recipient_id = client.get("/api/recipients").json()["items"][0]["recipient_id"]
 
@@ -104,14 +132,15 @@ def test_unresolved_submission_requires_explicit_acknowledgement(
             "expected_revision": revision,
             "analysis_id": analysis_id,
             "recipient_id": recipient_id,
-            "acknowledge_unresolved": False,
+            "acknowledge_unresolved": True,
         },
     )
-
-    assert refused.status_code == 422
+    assert refused.status_code == 409
     error = refused.json()["error"]
-    assert error["code"] == "INVALID_INPUT"
-    assert "acknowledge_unresolved" in {entry["field"] for entry in error["field_errors"]}
+    assert error["code"] == "CASE_NOT_COMPLETE"
+    assert error["field_errors"]
+
+    force_complete_verdict(db, analysis_id)
 
     accepted = client.post(
         f"/api/cases/{case_id}/submissions",
@@ -120,7 +149,6 @@ def test_unresolved_submission_requires_explicit_acknowledgement(
             "expected_revision": revision,
             "analysis_id": analysis_id,
             "recipient_id": recipient_id,
-            "acknowledge_unresolved": True,
         },
     )
     assert accepted.status_code == 201, accepted.text
@@ -136,6 +164,7 @@ def test_submission_stays_immutable_after_the_case_changes(
     """BE-14: the reviewer keeps seeing the version they received (B10)."""
     case_id, revision, analysis_id, headers = prepared_case(client, db)
     recipient_id = client.get("/api/recipients").json()["items"][0]["recipient_id"]
+    force_complete_verdict(db, analysis_id)
     submission = client.post(
         f"/api/cases/{case_id}/submissions",
         headers=headers,
@@ -143,7 +172,6 @@ def test_submission_stays_immutable_after_the_case_changes(
             "expected_revision": revision,
             "analysis_id": analysis_id,
             "recipient_id": recipient_id,
-            "acknowledge_unresolved": True,
         },
     ).json()
 
@@ -180,6 +208,7 @@ def test_reviewer_sees_only_assigned_submissions(
     """BE-12: the inbox is scoped, and preparers cannot use reviewer routes."""
     case_id, revision, analysis_id, headers = prepared_case(client, db)
     recipient_id = client.get("/api/recipients").json()["items"][0]["recipient_id"]
+    force_complete_verdict(db, analysis_id)
     submission_id = client.post(
         f"/api/cases/{case_id}/submissions",
         headers=headers,
@@ -187,7 +216,6 @@ def test_reviewer_sees_only_assigned_submissions(
             "expected_revision": revision,
             "analysis_id": analysis_id,
             "recipient_id": recipient_id,
-            "acknowledge_unresolved": True,
         },
     ).json()["submission_id"]
 
@@ -210,6 +238,7 @@ def test_reviewer_can_read_submitted_originals_only(
     """B10: submitted originals are reachable through authorized snapshot access."""
     case_id, revision, analysis_id, headers = prepared_case(client, db)
     recipient_id = client.get("/api/recipients").json()["items"][0]["recipient_id"]
+    force_complete_verdict(db, analysis_id)
     submission_id = client.post(
         f"/api/cases/{case_id}/submissions",
         headers=headers,
@@ -217,7 +246,6 @@ def test_reviewer_can_read_submitted_originals_only(
             "expected_revision": revision,
             "analysis_id": analysis_id,
             "recipient_id": recipient_id,
-            "acknowledge_unresolved": True,
         },
     ).json()["submission_id"]
 
@@ -244,6 +272,7 @@ def test_review_event_updates_state_and_reaches_preparer_activity(
     """A clarification request is an event the preparer can see (B10, F4)."""
     case_id, revision, analysis_id, headers = prepared_case(client, db)
     recipient_id = client.get("/api/recipients").json()["items"][0]["recipient_id"]
+    force_complete_verdict(db, analysis_id)
     submission_id = client.post(
         f"/api/cases/{case_id}/submissions",
         headers=headers,
@@ -251,7 +280,6 @@ def test_review_event_updates_state_and_reaches_preparer_activity(
             "expected_revision": revision,
             "analysis_id": analysis_id,
             "recipient_id": recipient_id,
-            "acknowledge_unresolved": True,
         },
     ).json()["submission_id"]
 
@@ -406,6 +434,7 @@ def test_submission_appears_in_case_summaries(
     """``GET /cases/{id}`` reports the submission the preparer sent (B9)."""
     case_id, revision, analysis_id, headers = prepared_case(client, db)
     recipient_id = client.get("/api/recipients").json()["items"][0]["recipient_id"]
+    force_complete_verdict(db, analysis_id)
     submission_id = client.post(
         f"/api/cases/{case_id}/submissions",
         headers=headers,
@@ -413,7 +442,6 @@ def test_submission_appears_in_case_summaries(
             "expected_revision": revision,
             "analysis_id": analysis_id,
             "recipient_id": recipient_id,
-            "acknowledge_unresolved": True,
         },
     ).json()["submission_id"]
 

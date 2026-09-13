@@ -1,8 +1,8 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { caseApi } from "../api";
 import { ApiError } from "../api/ApiError";
-import type { FindingResponse, ReviewerSubmissionDetail, ReviewEventType } from "../api/types";
+import type { FindingResponse, ReviewerSubmissionDetail } from "../api/types";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { DocumentPreview } from "../components/DocumentPreview";
@@ -12,6 +12,8 @@ import {
   ANALYSIS_STATUS_TONE,
   LEGAL_COVERAGE_LABEL,
   LEGAL_COVERAGE_TONE,
+  READINESS_LABEL,
+  READINESS_TONE,
 } from "../lib/findingLabels";
 import { REVIEW_EVENT_TYPE_LABEL, reviewerStatusLabel, reviewerStatusTone } from "../lib/reviewerLabels";
 
@@ -27,18 +29,15 @@ function formatDateFr(iso: string): string {
 /**
  * Reviewer submission detail (frontend.md "Reviewer back office", B10): the
  * immutable snapshot frozen at submission time, never the case's current
- * working revision (FE-09). Read-only everywhere except the review actions.
+ * working revision (FE-09). Read-only inbox: the reviewer no longer decides
+ * completeness or requests clarifications from here (spec/progress.md change
+ * log, "Readiness verdict replaces reviewer approval").
  */
 export function ReviewerSubmissionDetailPage() {
   const { submissionId } = useParams<{ submissionId: string }>();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
-  const [message, setMessage] = useState("");
-  const [messageError, setMessageError] = useState<string | null>(null);
-  const [posting, setPosting] = useState<ReviewEventType | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const messageFieldId = useId();
 
   useEffect(() => {
     if (!submissionId) return;
@@ -62,34 +61,6 @@ export function ReviewerSubmissionDetailPage() {
     if (state.status !== "loaded") return new Map();
     return new Map(state.detail.responses.map((r) => [r.finding_id, r]));
   }, [state]);
-
-  async function handleAction(eventType: ReviewEventType): Promise<void> {
-    if (state.status !== "loaded" || !submissionId) return;
-    if (eventType === "clarification_requested" && message.trim().length === 0) {
-      setMessageError("Un message est requis pour demander une clarification.");
-      return;
-    }
-    setMessageError(null);
-    setActionError(null);
-    setPosting(eventType);
-    try {
-      const event = await caseApi.createReviewEvent(
-        submissionId,
-        eventType,
-        eventType === "clarification_requested" ? message.trim() : null,
-      );
-      setState((prev) =>
-        prev.status === "loaded"
-          ? { status: "loaded", detail: { ...prev.detail, events: [...prev.detail.events, event] } }
-          : prev,
-      );
-      setMessage("");
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "L'action n'a pas pu être enregistrée. Réessayez.");
-    } finally {
-      setPosting(null);
-    }
-  }
 
   if (state.status === "loading") {
     return (
@@ -135,13 +106,14 @@ export function ReviewerSubmissionDetailPage() {
             {detail.claim.claimed_amount} {detail.claim.currency}
           </p>
           <Badge tone={reviewerStatusTone(currentStatus)}>{reviewerStatusLabel(currentStatus)}</Badge>
+          <Badge tone={READINESS_TONE[detail.readiness.status]}>{READINESS_LABEL[detail.readiness.status]}</Badge>
         </div>
       </div>
 
       <p className="mt-3 rounded-sm bg-surface-muted px-3 py-2 text-xs text-text-muted">
         Cet écran présente la version transmise au moment de la soumission ; les modifications ultérieures du dossier
-        du préparateur n'y apparaissent pas. Marquer ce dossier « reçu » ou « examiné » n'emporte aucune acceptation
-        juridique ni certification.
+        du préparateur n'y apparaissent pas. Ce dossier n'a été transmis qu'une fois complet selon le verdict
+        automatique ci-dessus ; cela n'emporte aucune acceptation juridique ni certification.
       </p>
 
       {/* Claim summary */}
@@ -240,78 +212,23 @@ export function ReviewerSubmissionDetailPage() {
         </ul>
       </div>
 
-      {/* Review actions */}
-      <div className="mt-6 rounded-md border border-border bg-surface p-4">
-        <h2 className="text-md font-medium text-text">Actions du relecteur</h2>
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            variant="secondary"
-            disabled={posting !== null}
-            onClick={() => void handleAction("received")}
-          >
-            Marquer comme reçu
-          </Button>
-          <Button
-            disabled={posting !== null}
-            onClick={() => void handleAction("reviewed")}
-          >
-            Marquer comme examiné
-          </Button>
+      {/* Read-only history: this inbox no longer records new reviewer actions. */}
+      {detail.events.length > 0 && (
+        <div className="mt-6 rounded-md border border-border bg-surface p-4">
+          <h2 className="text-md font-medium text-text">Historique</h2>
+          <ul className="mt-2 flex flex-col gap-2">
+            {[...detail.events].reverse().map((event) => (
+              <li key={event.event_id} className="rounded-sm border border-border bg-surface-muted p-2 text-sm">
+                <p className="tabular text-xs text-text-subtle">{formatDateFr(event.created_at)}</p>
+                <p className="mt-0.5 text-text">
+                  {REVIEW_EVENT_TYPE_LABEL[event.event_type]}
+                  {event.message && <> — <span dir="auto">{event.message}</span></>}
+                </p>
+              </li>
+            ))}
+          </ul>
         </div>
-
-        <div className="mt-4">
-          <label htmlFor={messageFieldId} className="text-sm font-medium text-text">
-            Demander une clarification
-          </label>
-          <textarea
-            id={messageFieldId}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={3}
-            dir="auto"
-            aria-invalid={messageError ? true : undefined}
-            className="mt-1 w-full rounded-sm border border-border-strong bg-surface px-3 py-2 text-base text-text"
-          />
-          {messageError && (
-            <p role="alert" className="mt-1 text-sm text-danger">
-              {messageError}
-            </p>
-          )}
-          <div className="mt-2">
-            <Button
-              variant="secondary"
-              disabled={posting !== null}
-              onClick={() => void handleAction("clarification_requested")}
-            >
-              Envoyer la demande de clarification
-            </Button>
-          </div>
-        </div>
-
-        {actionError && (
-          <p role="alert" className="mt-3 rounded-sm bg-danger-bg px-3 py-2 text-sm text-danger">
-            {actionError}
-          </p>
-        )}
-
-        {detail.events.length > 0 && (
-          <div className="mt-6">
-            <h3 className="text-xs font-medium text-text-subtle">Historique des actions</h3>
-            <ul className="mt-1 flex flex-col gap-2">
-              {[...detail.events].reverse().map((event) => (
-                <li key={event.event_id} className="rounded-sm border border-border bg-surface-muted p-2 text-sm">
-                  <p className="tabular text-xs text-text-subtle">{formatDateFr(event.created_at)}</p>
-                  <p className="mt-0.5 text-text">
-                    {REVIEW_EVENT_TYPE_LABEL[event.event_type]}
-                    {event.message && <> — <span dir="auto">{event.message}</span></>}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import type {
   FindingResponse,
   Intake,
   Job,
+  Readiness,
   ReviewEvent,
   SubmissionSummary,
 } from "../types";
@@ -40,6 +41,7 @@ export interface StoredSubmission {
     documents: DocumentRecord[];
     analysis: Analysis;
     responses: FindingResponse[];
+    readiness: Readiness;
   };
   events: ReviewEvent[];
 }

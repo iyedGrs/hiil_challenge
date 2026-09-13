@@ -45,12 +45,14 @@ from app.domain.enums import (
     FindingStatus,
     JobKind,
     JobStatus,
+    ReadinessStatus,
     ReviewEventType,
     SubmissionState,
 )
 from app.errors import (
     ANALYSIS_NOT_PUBLISHED,
     ANALYSIS_OUTDATED,
+    CASE_NOT_COMPLETE,
     EXPORT_NOT_READY,
     INVALID_INPUT,
     ApiError,
@@ -67,9 +69,11 @@ from app.models.finding import Finding, FindingResponse
 from app.models.job import Job
 from app.models.submission import Export, ReviewEvent, Submission, SubmissionDocument
 from app.models.user import Recipient, User
+from app.pipeline.readiness import Readiness, case_readiness
 from app.schemas.cases import ClaimOut, DatesOut, FollowUpAnswerOut
 from app.schemas.common import ListResponse
 from app.schemas.documents import DocumentOut
+from app.schemas.readiness import ReadinessOut
 from app.schemas.reviewer import ReviewerSubmissionDetailOut
 from app.schemas.submissions import (
     ExportIn,
@@ -148,6 +152,24 @@ def _require_acknowledgement(
             ],
         )
     return open_findings
+
+
+def _require_complete_verdict(db: DbDep, case: Case, analysis: Analysis) -> Readiness:
+    """Require the automatic readiness verdict to be ``complete`` (B10).
+
+    Submission is the only handoff to a human reviewer, and the reviewer no
+    longer decides completeness -- the verdict does. An incomplete or
+    not-yet-analyzed case is refused with the same reasons the preparer sees
+    on the case (spec/progress.md change log).
+    """
+    readiness = case_readiness(db, case_revision=case.revision, analysis=analysis)
+    if readiness.status is not ReadinessStatus.complete:
+        raise ApiError(
+            CASE_NOT_COMPLETE,
+            "Ce dossier n'est pas encore complet et ne peut pas être transmis.",
+            field_errors=[FieldError("readiness", reason) for reason in readiness.reasons],
+        )
+    return readiness
 
 
 @router.get(
@@ -324,7 +346,10 @@ def create_submission(
             return _submission_out(existing)
 
     analysis = _load_current_published_analysis(db, case, payload.analysis_id)
-    open_findings = _require_acknowledgement(db, analysis, payload.acknowledge_unresolved)
+    readiness = _require_complete_verdict(db, case, analysis)
+    # ponytail: a complete verdict already guarantees zero open findings, so no
+    # separate count query is needed here (see app.pipeline.readiness).
+    open_findings = 0
 
     recipient = db.scalar(
         select(Recipient).where(
@@ -387,6 +412,10 @@ def create_submission(
             "disclosures": analysis.disclosures,
             "unresolved_count": open_findings,
             "claimant_name": claim.claimant_name,
+            # Frozen verdict: submission was only reachable because this was
+            # "complete" at the time, but the reasons/status are recorded
+            # verbatim so the reviewer inbox never has to recompute it.
+            "readiness": readiness.as_dict(),
             # Frozen document view, so a later detach cannot change what the
             # reviewer sees (spec/backend.md B10).
             "documents": [
@@ -432,6 +461,15 @@ def create_submission(
         open_findings,
     )
     return _submission_out(submission)
+
+
+def _readiness_from_manifest(submission: Submission) -> ReadinessOut:
+    """Rebuild the frozen verdict recorded at submission time (B10)."""
+    frozen = submission.manifest.get("readiness") or {}
+    return ReadinessOut(
+        status=ReadinessStatus(frozen.get("status", ReadinessStatus.complete.value)),
+        reasons=list(frozen.get("reasons") or []),
+    )
 
 
 def _submission_out(submission: Submission) -> SubmissionOut:
@@ -483,6 +521,7 @@ def list_reviewer_submissions(
                 revision=submission.revision,
                 status=submission.state,
                 submitted_at=submission.submitted_at,
+                readiness=_readiness_from_manifest(submission),
             )
             for submission in submissions
         ],
@@ -596,6 +635,7 @@ def get_reviewer_submission(
         claim=_claim_from_snapshot(submission.claim_snapshot),
         documents=documents,
         analysis=analysis_out(db, analysis),
+        readiness=_readiness_from_manifest(submission),
         responses=responses,  # type: ignore[arg-type]
         events=events,
     )

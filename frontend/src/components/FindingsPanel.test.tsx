@@ -44,6 +44,7 @@ function baseDetail(overrides: Partial<CaseDetail> = {}): CaseDetail {
     documents: [],
     latest_job: null,
     latest_analysis: null,
+    readiness: { status: "needs_analysis", reasons: [] },
     submissions: [],
     activity: [],
     responses: [],

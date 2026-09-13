@@ -45,6 +45,7 @@ from app.models.job import Job
 from app.models.legal import Check
 from app.models.subject import Subject
 from app.models.submission import Export
+from app.pipeline.readiness import case_readiness
 
 logger = logging.getLogger("app.pipeline.export")
 
@@ -109,8 +110,19 @@ class _Page:
         self.y -= amount
 
 
+def _verdict_line(db: DbSession, case: Case, analysis: Analysis) -> tuple[str, list[str]]:
+    """Render the automatic readiness verdict (spec/progress.md change log)."""
+    readiness = case_readiness(db, case_revision=case.revision, analysis=analysis)
+    if readiness.status.value == "complete":
+        return "Verdict du dossier : Dossier complet et coherent - pret a transmettre.", []
+    if readiness.status.value == "needs_analysis":
+        return "Verdict du dossier : Analyse requise.", readiness.reasons
+    return "Verdict du dossier : Dossier incomplet.", readiness.reasons
+
+
 def _summary_pdf(
     *,
+    db: DbSession,
     case: Case,
     claim: ClaimRevision,
     analysis: Analysis,
@@ -128,6 +140,12 @@ def _summary_pdf(
     page.pdf.setFont("Helvetica-Bold", 15)
     page.pdf.drawString(20 * mm, page.y, "Dossier de preparation - litige commercial")
     page.y -= 10 * mm
+
+    verdict_line, verdict_reasons = _verdict_line(db, case, analysis)
+    page.line(verdict_line, bold=True)
+    for reason in verdict_reasons:
+        page.line(f"- {reason}", indent=4 * mm)
+    page.gap()
 
     page.heading("Avertissement")
     for line in DISCLAIMER_LINES:
@@ -351,6 +369,7 @@ def build_export(db: DbSession, export: Export) -> None:
     }
 
     summary = _summary_pdf(
+        db=db,
         case=case,
         claim=claim,
         analysis=analysis,

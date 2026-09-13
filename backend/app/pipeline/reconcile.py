@@ -210,9 +210,14 @@ def reconcile(
         "Solde établi d'après les documents déposés uniquement. "
         f"Total de facture retenu : {format_amount(invoice_total)} {currency}. "
         f"Paiements rattachés : {format_amount(paid)} {currency}. "
-        f"Notes de crédit rattachées : {format_amount(credited)} {currency}. "
-        "L'absence d'un reçu ne prouve pas qu'aucun paiement n'a été effectué."
+        f"Notes de crédit rattachées : {format_amount(credited)} {currency}."
     )
+    if not payment_facts and not credit_facts:
+        # Only caveat an absence of documented payment: when something was
+        # actually attached, the balance already accounts for it (B7).
+        coverage_note += (
+            " L'absence d'un reçu ne prouve pas qu'aucun paiement n'a été effectué."
+        )
     payload: dict[str, object] = {
         "documented_balance": format_amount(documented_balance),
         "currency": currency,

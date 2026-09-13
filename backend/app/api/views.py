@@ -25,12 +25,14 @@ from app.models.finding import FindingResponse
 from app.models.job import Job
 from app.models.legal import Check
 from app.models.subject import Subject
+from app.pipeline.readiness import Readiness, case_readiness
 from app.schemas.analyses import AnalysisOut, CheckOut, CoverageOut, EvidenceRefOut, ReconciliationOut
 from app.schemas.cases import ClaimOut, DatesOut, FollowUpAnswerOut, IntakeOut, IntakeQuestionOut
 from app.schemas.common import decimal_to_string
 from app.schemas.documents import DocumentOut, PageOut
 from app.schemas.findings import FindingResponseOut
 from app.schemas.jobs import JobOut
+from app.schemas.readiness import ReadinessOut
 
 
 def document_types(db: DbSession, document_ids: list[str]) -> dict[str, str | None]:
@@ -252,6 +254,16 @@ def analysis_out(db: DbSession, analysis: Analysis) -> AnalysisOut:
         checks=checks,
         reconciliation=reconciliation,
     )
+
+
+def readiness_out(readiness: Readiness) -> ReadinessOut:
+    """Project a computed :class:`Readiness` onto the wire shape."""
+    return ReadinessOut(status=readiness.status, reasons=readiness.reasons)
+
+
+def case_readiness_out(db: DbSession, *, case_revision: int, analysis: Analysis | None) -> ReadinessOut:
+    """Compute and project the case's automatic readiness verdict."""
+    return readiness_out(case_readiness(db, case_revision=case_revision, analysis=analysis))
 
 
 def finding_response_out(response: FindingResponse) -> FindingResponseOut:
