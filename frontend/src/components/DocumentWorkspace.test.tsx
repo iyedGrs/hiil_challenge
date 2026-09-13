@@ -21,7 +21,13 @@ const CONFIG: AppConfig = {
   case_types: ["unpaid_goods_invoice"],
   currencies: ["TND"],
   requested_outcomes: ["payment"],
-  limits: { max_active_files: 10, max_total_pages: 30, max_file_bytes: 10 * 1024 * 1024, max_case_bytes: 50 * 1024 * 1024 },
+  limits: {
+    max_active_files: 10,
+    max_total_pages: 30,
+    max_file_bytes: 10 * 1024 * 1024,
+    max_case_bytes: 50 * 1024 * 1024,
+    supported_mime_types: ["application/pdf", "image/jpeg", "image/png"],
+  },
   legal_coverage: { unpaid_goods_invoice: "unvalidated" },
   execution_mode: "fixture",
 };

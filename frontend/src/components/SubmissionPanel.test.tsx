@@ -18,7 +18,7 @@ vi.mock("../api", () => ({
 // eslint-disable-next-line import/order -- import after the mock so the mock is applied
 import { caseApi } from "../api";
 
-const RECIPIENTS: Recipient[] = [{ recipient_id: "recipient_1", name: "Réviseur Démo" }];
+const RECIPIENTS: Recipient[] = [{ recipient_id: "recipient_1", name: "Réviseur Démo", remit: "Reviews submitted case packages." }];
 
 function baseAnalysis(overrides: Partial<Analysis> = {}): Analysis {
   return {

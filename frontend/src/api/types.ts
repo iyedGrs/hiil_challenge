@@ -33,6 +33,7 @@ export interface ConfigLimits {
   max_total_pages: number;
   max_file_bytes: number;
   max_case_bytes: number;
+  supported_mime_types: string[];
 }
 
 // PROVISIONAL (B9 gap): B9 names `legal_coverage` on /config but not its inner
@@ -212,8 +213,15 @@ export type FindingDelta = "new" | "resolved" | "still_open" | "reopened" | "not
 /** Response actions per frontend.md F4 "Respond and reassess". */
 export type FindingAction = "add_evidence" | "correct_claim" | "explain_unavailable" | "disagree";
 
-/** Source basis per frontend.md F4 ("checklist, contract, claim or deterministic file/amount check"). */
-export type FindingBasis = "checklist" | "contract" | "claim" | "deterministic";
+/**
+ * Source basis per frontend.md F4 ("checklist, contract, claim or
+ * deterministic file/amount check"). Values confirmed against the live
+ * checklist pack (`backend/app/legal_packs/tn_goods_v1.json`) and
+ * `app/pipeline/publish.py`'s `BACKEND_DECIDED_BASIS`: the backend never
+ * emits "contract" or "claim" — `evidence_guidance` covers both, and
+ * `reconciliation` is the deterministic file/amount check.
+ */
+export type FindingBasis = "checklist" | "evidence_guidance" | "reconciliation";
 
 export interface EvidenceRef {
   fact_id: string;
@@ -330,11 +338,11 @@ export interface CaseDetail {
 // Recipients / export / submission
 // ---------------------------------------------------------------------------
 
-// PROVISIONAL (B9 gap): recipient fields are not enumerated ("Available
-// authorized reviewer destinations").
 export interface Recipient {
   recipient_id: string;
   name: string;
+  /** Descriptive only — never implies official filing, legal acceptance, or certification. */
+  remit: string;
 }
 
 /** States per frontend.md F4 ("Show actual states: generating, ready, failed."). */
