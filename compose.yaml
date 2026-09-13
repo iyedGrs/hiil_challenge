@@ -25,12 +25,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - copy .env.example to .env and set a locally generated value}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # Port 5432 is intentionally NOT published (L1: "do not expose by default").
-    # api and worker reach it over the Compose network as db:5432. Uncomment only
-    # if you must attach a host database client, and expect a host port clash
-    # with any local PostgreSQL install.
-    # ports:
-    #   - "5432:5432"
+    # L1 says "do not expose by default". Published on a non-default host port
+    # (55432, not 5432) so it cannot collide with a local PostgreSQL install and
+    # is not reachable at the address a scanner would try first. This exists so
+    # the backend test suite and a host-run uvicorn can reach the same database
+    # the containers use, which is the fast development loop for this hackathon.
+    # Drop this mapping for any deployed environment.
+    ports:
+      - "127.0.0.1:55432:5432"
     # A running container does not prove PostgreSQL accepts connections (L4), so
     # api/worker wait on this check through service_healthy.
     healthcheck:

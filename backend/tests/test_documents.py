@@ -1,9 +1,9 @@
 """Document ingestion slice checks (spec/backend.md B4, B9, B11).
 
-Cases and claim intake belong to a parallel branch (feat/backend-intake), so a
-minimal ``Case``/``ClaimRevision`` pair is inserted directly through SQLAlchemy
-here rather than through a ``POST /cases`` route -- that route is out of scope
-for this slice and deliberately not added.
+A minimal ``Case``/``ClaimRevision`` pair is inserted directly through
+SQLAlchemy rather than through ``POST /cases``, so these checks exercise the
+ingestion routes in isolation and stay unaffected by intake-gate rule changes.
+``tests/test_cases.py`` covers the case and intake routes themselves.
 
 No network or AI provider call. PDFs are generated in-memory with ReportLab so
 the embedded-text path is exercised without any system binary. The OCR path is
@@ -177,13 +177,17 @@ def test_upload_pdf_creates_ready_pages(
     assert body["revision"] == 2
     document = body["document"]
     assert document["state"] == DocumentState.ready.value
-    assert document["page_count"] == 2
-    assert document["mime_type"] == "application/pdf"
+    assert document["pages"] == 2
+    assert document["active"] is True
+    assert document["error"] is None
+    assert document["size_bytes"] == len(data)
     # The original filename is never used as the storage key.
-    assert document["display_name"] == "invoice.pdf"
+    assert document["filename"] == "invoice.pdf"
 
     pages = db.scalars(
-        select(Page).where(Page.document_id == document["id"]).order_by(Page.page_number)
+        select(Page)
+        .where(Page.document_id == document["document_id"])
+        .order_by(Page.page_number)
     ).all()
     assert len(pages) == 2
     assert all(page.state == PageState.ready for page in pages)
@@ -222,7 +226,7 @@ def test_duplicate_upload_returns_200_without_revision_bump(
     body = second.json()
     assert body["duplicate"] is True
     assert body["revision"] == revision_after_first
-    assert body["document"]["id"] == first.json()["document"]["id"]
+    assert body["document"]["document_id"] == first.json()["document"]["document_id"]
 
     db.refresh(case)
     assert case.revision == revision_after_first
@@ -353,8 +357,8 @@ def test_detach_bumps_revision_and_preserves_document_row(
         files={"file": ("invoice.pdf", pdf_bytes([LONG_PAGE_TEXT]), "application/pdf")},
         data={"expected_revision": "1"},
     )
-    document_id = upload.json()["document"]["id"]
-    revision_after_upload = upload.json()["revision"]
+    document_id = upload.json()["document"]["document_id"]
+    revision_after_upload: int = upload.json()["revision"]
 
     response = client.delete(
         f"/api/cases/{case.id}/documents/{document_id}",
@@ -365,7 +369,7 @@ def test_detach_bumps_revision_and_preserves_document_row(
     assert response.status_code == 200
     body = response.json()
     assert body["revision"] == revision_after_upload + 1
-    assert body["document"]["is_active"] is False
+    assert body["document"]["active"] is False
 
     row = db.get(Document, document_id)
     assert row is not None
@@ -388,7 +392,7 @@ def test_detach_with_stale_revision_returns_409(
         files={"file": ("invoice.pdf", pdf_bytes([LONG_PAGE_TEXT]), "application/pdf")},
         data={"expected_revision": "1"},
     )
-    document_id = upload.json()["document"]["id"]
+    document_id = upload.json()["document"]["document_id"]
 
     response = client.delete(
         f"/api/cases/{case.id}/documents/{document_id}",
@@ -436,7 +440,7 @@ def test_content_and_page_routes_are_owner_scoped(
         files={"file": ("invoice.pdf", pdf_bytes([LONG_PAGE_TEXT]), "application/pdf")},
         data={"expected_revision": "1"},
     )
-    document_id = upload.json()["document"]["id"]
+    document_id = upload.json()["document"]["document_id"]
 
     content_response = client.get(f"/api/documents/{document_id}/content")
     assert content_response.status_code == 200
@@ -446,10 +450,14 @@ def test_content_and_page_routes_are_owner_scoped(
     page_response = client.get(f"/api/documents/{document_id}/pages/1")
     assert page_response.status_code == 200
     page_body = page_response.json()
-    assert page_body["page_number"] == 1
+    assert page_body["page"] == 1
+    assert page_body["document_id"] == document_id
     assert page_body["method"] == PageMethod.embedded_text.value
-    assert page_body["state"] == PageState.ready.value
-    assert LONG_PAGE_TEXT in page_body["text"]
+    assert page_body["quality"] == PageState.ready.value
+    assert LONG_PAGE_TEXT in page_body["source_text"]
+    # Embedded-text pages are never rendered, so there is no image to preview.
+    assert page_body["image_url"] is None
+    assert client.get(f"/api/documents/{document_id}/pages/1/image").status_code == 404
 
     missing_page_response = client.get(f"/api/documents/{document_id}/pages/99")
     assert missing_page_response.status_code == 404
@@ -517,14 +525,22 @@ def test_image_upload_ocr_path_is_mocked(
     assert response.status_code == 201
     body = response.json()
     assert body["document"]["state"] == DocumentState.ready.value
-    assert body["document"]["page_count"] == 1
+    assert body["document"]["pages"] == 1
+    document_id = body["document"]["document_id"]
 
-    page = db.scalar(select(Page).where(Page.document_id == body["document"]["id"]))
+    page = db.scalar(select(Page).where(Page.document_id == document_id))
     assert page is not None
     assert page.method == PageMethod.ocr
     assert page.state == PageState.ready
     assert page.image_key is not None
     assert page.quality["source"] == "ocr"
+
+    # A rendered scan page exposes an authorized image URL that actually serves.
+    page_body = client.get(f"/api/documents/{document_id}/pages/1").json()
+    assert page_body["image_url"] == f"/api/documents/{document_id}/pages/1/image"
+    image_response = client.get(page_body["image_url"])
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"] == "image/png"
 
 
 @pytest.mark.skipif(
@@ -576,7 +592,7 @@ def test_ocr_missing_binary_marks_page_unreadable_not_crashed(
     body = response.json()
     assert body["document"]["state"] == DocumentState.unreadable.value
 
-    page = db.scalar(select(Page).where(Page.document_id == body["document"]["id"]))
+    page = db.scalar(select(Page).where(Page.document_id == body["document"]["document_id"]))
     assert page is not None
     assert page.state == PageState.unreadable
     assert page.quality.get("ocr_error") == "TesseractNotFoundError"

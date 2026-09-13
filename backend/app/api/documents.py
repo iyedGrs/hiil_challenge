@@ -21,10 +21,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, File, Form, Response, UploadFile
 from sqlalchemy import func, select
 
+from app.api.access import load_owned_case, load_owned_document, require_matching_revision
 from app.api.deps import CsrfDep, DbDep, PreparerDep
+from app.api.views import document_out, document_types, page_out
 from app.config import get_settings
 from app.domain.enums import DocumentState
-from app.errors import FILE_LIMIT, REVISION_CONFLICT, UNSUPPORTED_FILE, ApiError, not_found
+from app.errors import FILE_LIMIT, UNSUPPORTED_FILE, ApiError, not_found
 from app.extraction import (
     EXTRACTION_VERSION,
     ExtractionResult,
@@ -46,9 +48,7 @@ from app.files import (
 )
 from app.ids import DOCUMENT_PREFIX, PAGE_PREFIX, new_id
 from app.models.base import utcnow
-from app.models.case import Case
 from app.models.document import Document, Page
-from app.models.user import User
 from app.schemas.documents import DeleteDocumentOut, DocumentOut, PageOut, UploadDocumentOut
 
 logger = logging.getLogger("app.api.documents")
@@ -64,47 +64,10 @@ REJECTION_ENCRYPTED_OR_UNREADABLE = "ENCRYPTED_OR_UNREADABLE"
 READ_CHUNK_BYTES = 65_536
 
 
-def _load_owned_case(db: DbDep, case_id: str, user: User, *, lock: bool) -> Case:
-    """Return the case owned by ``user``, or raise 404 without disclosing it.
-
-    ``lock`` takes a ``SELECT ... FOR UPDATE`` so the revision check and the
-    eventual bump/detach happen atomically within one transaction (B9).
-    """
-    stmt = select(Case).where(Case.id == case_id)
-    if lock:
-        stmt = stmt.with_for_update()
-    case = db.scalar(stmt)
-    if case is None or case.owner_id != user.id:
-        raise not_found()
-    return case
-
-
-def _require_matching_revision(case: Case, expected_revision: int) -> None:
-    """Raise 409 ``REVISION_CONFLICT`` when ``expected_revision`` is stale (B9)."""
-    if case.revision != expected_revision:
-        raise ApiError(
-            REVISION_CONFLICT,
-            "The case has changed since this revision was read.",
-        )
-
-
-def _document_out(document: Document) -> DocumentOut:
-    return DocumentOut(
-        id=document.id,
-        case_id=document.case_id,
-        display_name=document.display_name,
-        mime_type=document.mime_type,
-        byte_size=document.byte_size,
-        page_count=document.page_count,
-        state=document.state,
-        is_active=document.is_active,
-        rejection_code=document.rejection_code,
-        rejection_message=document.rejection_message,
-        added_revision=document.added_revision,
-        detached_revision=document.detached_revision,
-        created_at=document.created_at,
-        detached_at=document.detached_at,
-    )
+def _document_out(db: DbDep, document: Document) -> DocumentOut:
+    """Project one document, resolving its server-classified type (B4, B9)."""
+    types = document_types(db, [document.id])
+    return document_out(document, types.get(document.id))
 
 
 async def _read_upload(file: UploadFile, max_file_bytes: int) -> tuple[bytes, str | None]:
@@ -207,8 +170,8 @@ async def upload_document(
        415. A page-count overflow answers 413 without storing anything.
     """
     settings = get_settings()
-    case = _load_owned_case(db, case_id, user, lock=True)
-    _require_matching_revision(case, expected_revision)
+    case = load_owned_case(db, case_id, user, lock=True)
+    require_matching_revision(case, expected_revision)
 
     data, sniffed_mime = await _read_upload(file, settings.max_file_bytes)
     if sniffed_mime not in settings.supported_mime_types:
@@ -225,7 +188,9 @@ async def upload_document(
         # 200, not the route's default 201: no new active file/revision was
         # created (spec/backend.md B9).
         response.status_code = 200
-        return UploadDocumentOut(duplicate=True, document=_document_out(duplicate), revision=case.revision)
+        return UploadDocumentOut(
+            duplicate=True, document=_document_out(db, duplicate), revision=case.revision
+        )
 
     active_files, active_bytes, active_pages = _active_document_totals(db, case.id)
     if active_files >= settings.max_case_files:
@@ -320,7 +285,9 @@ async def upload_document(
         )
 
     db.flush()
-    return UploadDocumentOut(duplicate=False, document=_document_out(document), revision=new_revision)
+    return UploadDocumentOut(
+        duplicate=False, document=_document_out(db, document), revision=new_revision
+    )
 
 
 @router.delete(
@@ -344,8 +311,8 @@ def delete_document(
     unknown, belongs to another case/owner, or is already inactive answers 404
     without distinguishing those cases (B9).
     """
-    case = _load_owned_case(db, case_id, user, lock=True)
-    _require_matching_revision(case, expected_revision)
+    case = load_owned_case(db, case_id, user, lock=True)
+    require_matching_revision(case, expected_revision)
 
     document = db.scalar(
         select(Document).where(Document.id == document_id, Document.case_id == case.id)
@@ -360,19 +327,7 @@ def delete_document(
     document.detached_revision = new_revision
 
     db.flush()
-    return DeleteDocumentOut(document=_document_out(document), revision=new_revision)
-
-
-def _load_owned_document(db: DbDep, document_id: str, user: User) -> Document:
-    """Return ``document_id`` when its case is owned by ``user``, else 404 (B9)."""
-    document = db.scalar(
-        select(Document)
-        .join(Case, Case.id == Document.case_id)
-        .where(Document.id == document_id, Case.owner_id == user.id)
-    )
-    if document is None:
-        raise not_found()
-    return document
+    return DeleteDocumentOut(document=_document_out(db, document), revision=new_revision)
 
 
 @router.get(
@@ -389,7 +344,7 @@ def get_document_content(document_id: str, user: PreparerDep, db: DbDep) -> Resp
     injection risk.
     """
     settings = get_settings()
-    document = _load_owned_document(db, document_id, user)
+    document = load_owned_document(db, document_id, user)
     data = read_bytes(settings.file_storage_root, document.storage_key)
     encoded_name = quote(document.display_name)
     disposition = f"inline; filename*=UTF-8''{encoded_name}"
@@ -410,25 +365,42 @@ def get_document_page(
 ) -> PageOut:
     """``GET /api/documents/{id}/pages/{page}`` (B4, B9).
 
-    Returns the immutable stored page text and quality metadata. Image bytes
-    are not served in this slice; ``has_image`` tells the caller whether a
-    rendered page image exists in storage for a future preview endpoint.
+    Returns the immutable stored page text plus the readability outcome, and an
+    ``image_url`` pointing at the rendered-page route when the page was OCR'd
+    from a scan.
     """
-    document = _load_owned_document(db, document_id, user)
+    document = load_owned_document(db, document_id, user)
+    page = _load_page(db, document, page_number)
+    return page_out(page)
+
+
+@router.get(
+    "/documents/{document_id}/pages/{page_number}/image",
+    summary="Preview the rendered image of one scanned page",
+)
+def get_document_page_image(
+    document_id: str, page_number: int, user: PreparerDep, db: DbDep
+) -> Response:
+    """Serve the rendered PNG for a scanned page (B4, B9).
+
+    Only pages that were actually rendered during extraction have an image;
+    pages read from embedded PDF text answer 404. Authorization is the same
+    owner check as every other document route.
+    """
+    settings = get_settings()
+    document = load_owned_document(db, document_id, user)
+    page = _load_page(db, document, page_number)
+    if page.image_key is None:
+        raise not_found()
+    data = read_bytes(settings.file_storage_root, page.image_key)
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "private"})
+
+
+def _load_page(db: DbDep, document: Document, page_number: int) -> Page:
+    """Return one 1-based page of ``document``, or 404."""
     page = db.scalar(
         select(Page).where(Page.document_id == document.id, Page.page_number == page_number)
     )
     if page is None:
         raise not_found()
-    return PageOut(
-        id=page.id,
-        document_id=page.document_id,
-        page_number=page.page_number,
-        text=page.text,
-        method=page.method,
-        state=page.state,
-        char_count=page.char_count,
-        extraction_version=page.extraction_version,
-        quality=page.quality,
-        has_image=page.image_key is not None,
-    )
+    return page
