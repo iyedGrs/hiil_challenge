@@ -181,6 +181,8 @@ class LiveAiAdapter:
                 {"role": "user", "content": user_content},
             ],
             # Reasoning models reject `max_tokens` and any non-default temperature.
+            # JSON-only. No `temperature`: reasoning models (gpt-5.x, o-series) reject
+            # anything but the default, and they replaced `max_tokens` with this field.
             "max_completion_tokens": MAX_OUTPUT_TOKENS,
             "response_format": {"type": "json_object"},
         }
@@ -200,7 +202,14 @@ class LiveAiAdapter:
             raise AiUnavailableError(f"provider transport failure ({type(exc).__name__})") from exc
 
         if response.status_code >= 400:
-            raise AiUnavailableError(f"provider returned HTTP {response.status_code}")
+            # Only the structured code/param are surfaced, never `message`, which
+            # can echo request content (B9, L6).
+            try:
+                error = response.json().get("error") or {}
+                detail = f" (code={error.get('code')}, param={error.get('param')})"
+            except (ValueError, AttributeError):
+                detail = ""
+            raise AiUnavailableError(f"provider returned HTTP {response.status_code}{detail}")
 
         try:
             body = response.json()

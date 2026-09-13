@@ -69,6 +69,7 @@ from app.models.finding import Finding, FindingResponse
 from app.models.job import Job
 from app.models.submission import Export, ReviewEvent, Submission, SubmissionDocument
 from app.models.user import Recipient, User
+from app.pipeline.export import sanitize_case_reference
 from app.pipeline.readiness import Readiness, case_readiness
 from app.schemas.cases import ClaimOut, DatesOut, FollowUpAnswerOut
 from app.schemas.common import ListResponse
@@ -292,10 +293,11 @@ def get_export_content(export_id: str, user: PreparerDep, db: DbDep) -> Response
             else "The package could not be generated.",
         )
     data = read_bytes(settings.file_storage_root, export.storage_key)
+    filename = f"e-ethbet-dossier-{sanitize_case_reference(export.case_id)}.zip"
     return Response(
         content=data,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="dossier-{export.id}.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
